@@ -1,6 +1,6 @@
 # Visualization
 
-Repository for **T2 Factor Visualizer**: a local-first web application that turns a multi-sheet Excel workbook into an interactive time-series analysis interface.
+Repository for **T2 Factor Visualizer** and **Triptych**: local-first web applications that turn a multi-sheet Excel workbook into interactive time-series analysis interfaces.
 
 The app is built for comparing many variables (factors) across many countries/markets over time, with fast filtering, transformations, and shareable state.
 
@@ -9,7 +9,7 @@ This repo provides an end-to-end workflow:
 
 1. Read a structured Excel workbook (`T2 Master.xlsx` style data).
 2. Convert the workbook into a frontend-friendly JSON dataset.
-3. Serve a static web UI that supports multi-selection and charting.
+3. Serve static web UIs that support multi-selection and charting.
 4. Persist chart configuration in URL parameters for reproducible views.
 
 In short: it is a lightweight analytics product for cross-country factor visualization.
@@ -41,12 +41,15 @@ Use this project when you need to answer questions like:
 ├── README.md                      # Repository-level guide (this file)
 └── app/
     ├── index.html                 # App shell
+    ├── triptych.html              # Triptych shell
     ├── README.md                  # App-level usage documentation
     ├── docs/
     │   └── PROGRAM.md             # Technical architecture and behavior
     ├── assets/
     │   ├── app.js                 # Frontend state, parsing, rendering logic
-    │   └── styles.css             # UI styling
+    │   ├── triptych.js            # Triptych logic and calculations
+    │   ├── styles.css             # UI styling
+    │   └── triptych.css           # Triptych styling
     ├── scripts/
     │   └── extract_t2_master.py   # Excel -> JSON extractor
     └── data/
@@ -132,6 +135,15 @@ This prevents accidental “too many lines x too many points” crashes.
 - No built-in export module (PNG/CSV) yet.
 - Automated test suite is not yet implemented.
 
+## Triptych App
+`Triptych` is a 3-panel app at [`app/triptych.html`](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/triptych.html):
+- Top panel: one variable (raw or normalized)
+- Middle panel: cumulative return of that variable
+- Bottom panel: decile run of `N`-month forward returns
+
+Run it with the same static server and open:
+- `http://127.0.0.1:8000/triptych.html`
+
 ## Developer Notes
 - Frontend is vanilla JS for minimal dependencies.
 - Charting is done with Chart.js via CDN.
@@ -147,4 +159,3 @@ This prevents accidental “too many lines x too many points” crashes.
 ## Documentation Map
 - App guide: [app/README.md](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/README.md)
 - Technical reference: [app/docs/PROGRAM.md](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/docs/PROGRAM.md)
-

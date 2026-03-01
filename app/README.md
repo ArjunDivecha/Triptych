@@ -1,15 +1,21 @@
-# T2 Factor Visualizer
+# T2 Factor Visualizer + Triptych
 
-Interactive local web app for exploring the `T2 Master.xlsx` dataset across:
+Interactive local web apps for exploring the `T2 Master.xlsx` dataset across:
 - multiple variables (Excel sheets)
 - multiple countries/markets
 - time
 
-The app is optimized for fast side-by-side comparison of factor and market series, with range controls, transformation modes, selection persistence, and shareable URLs.
+`T2 Factor Visualizer` is optimized for multi-series comparison.
+
+`Triptych` is optimized for a 3-panel workflow:
+- top panel: one selected variable (raw or normalized)
+- middle panel: cumulative return to that variable
+- bottom panel: decile run of forward returns for selected horizon
 
 ## Contents
 - Overview
 - Features
+- Triptych Features
 - Project Structure
 - Quick Start
 - Data Pipeline
@@ -42,12 +48,25 @@ Architecture:
 - URL state persistence and shareable links
 - Render guardrails for large selections
 
+## Triptych Features
+- Single-variable focus by country
+- Top-panel normalization modes:
+  - `Raw`
+  - `Z-Score vs own history`
+  - `Percentile vs all variables (same month)`
+- Middle panel cumulative return of the selected variable
+- Bottom panel decile-run bars (`N` month forward return when top panel is in selected decile)
+- Decile stats table (`Obs`, `Avg`, `Median`, `Hit Rate`)
+- Range controls and URL/local-state persistence
+
 ## Project Structure
 ```text
 app/
   assets/
     app.js                # Frontend logic/state/chart rendering
+    triptych.js           # Triptych app logic
     styles.css            # UI styling
+    triptych.css          # Triptych app styling
   data/
     t2_master.json        # Generated data payload used by UI
   docs/
@@ -55,6 +74,7 @@ app/
   scripts/
     extract_t2_master.py  # Workbook -> JSON extractor
   index.html              # App shell
+  triptych.html           # Triptych shell
   README.md               # This file
 ```
 
@@ -76,6 +96,8 @@ python3 -m http.server 8000
 
 3. Open in browser
 - `http://127.0.0.1:8000`
+- Visualizer: `http://127.0.0.1:8000/index.html`
+- Triptych: `http://127.0.0.1:8000/triptych.html`
 
 ## Data Pipeline
 ### Input

@@ -1,4 +1,4 @@
-# T2 Factor Visualizer + Triptych
+# Triptych
 
 Interactive local web apps for exploring the `T2 Master.xlsx` dataset across:
 - multiple variables (Excel sheets)
@@ -9,8 +9,8 @@ Interactive local web apps for exploring the `T2 Master.xlsx` dataset across:
 
 `Triptych` is optimized for a 3-panel workflow:
 - top panel: one selected variable (raw or normalized)
-- middle panel: cumulative return to that variable
-- bottom panel: decile run of forward returns for selected horizon
+- middle panel: cumulative return to selected country (absolute or relative to all-country average)
+- bottom panel: `N`-month forward return by decile (all deciles shown)
 
 ## Contents
 - Overview
@@ -52,10 +52,10 @@ Architecture:
 - Single-variable focus by country
 - Top-panel normalization modes:
   - `Raw`
-  - `Z-Score vs own history`
-  - `Percentile vs all variables (same month)`
-- Middle panel cumulative return of the selected variable
-- Bottom panel decile-run bars (`N` month forward return when top panel is in selected decile)
+  - `Z-Score vs own history` (expanding window, no look-ahead)
+  - `Percentile vs other countries (same month)`
+- Middle panel cumulative return mode: `Absolute` or `Relative vs all-country average` (from return-index sheet)
+- Bottom panel forward return by signal decile (`N`-month average return for each decile)
 - Decile stats table (`Obs`, `Avg`, `Median`, `Hit Rate`)
 - Range controls and URL/local-state persistence
 

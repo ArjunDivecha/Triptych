@@ -2,19 +2,24 @@ const DATA_PATH = "./data/t2_master.json";
 const STORAGE_KEY = "triptych:last";
 
 const RANGE_VALUES = new Set(["all", "10y", "5y", "3y", "1y"]);
-const HORIZON_OPTIONS = [3, 6, 12, 24, 36];
+const HORIZON_OPTIONS = [1, 3, 6, 12, 24, 36];
 const NORMALIZATION_OPTIONS = [
   { value: "raw", label: "Raw" },
   { value: "history_z", label: "Z-Score vs own history" },
-  { value: "cross_var_pct", label: "Percentile vs all variables (same month)" },
+  { value: "cross_var_pct", label: "Cross-Sectional" },
 ];
+const RETURN_MODE_OPTIONS = [
+  { value: "absolute", label: "Absolute Return" },
+  { value: "relative", label: "Relative Return" },
+];
+const RETURN_SHEET_ALIASES = ["tot return index", "total return index", "tot return", "total return"];
 
 const dom = {
   banner: document.getElementById("banner"),
   factorSelect: document.getElementById("factorSelect"),
   normalizationSelect: document.getElementById("normalizationSelect"),
   countrySelect: document.getElementById("countrySelect"),
-  decileSelect: document.getElementById("decileSelect"),
+  returnModeSelect: document.getElementById("returnModeSelect"),
   horizonSelect: document.getElementById("horizonSelect"),
   rangeButtons: Array.from(document.querySelectorAll(".rangeBtn")),
   summary: document.getElementById("summary"),
@@ -31,7 +36,7 @@ let workbook;
 let allSheets = [];
 let sheetToCountries = new Map();
 let seriesCache = new Map();
-let crossVariableCache = new Map();
+let crossCountryCache = new Map();
 let dateDomain = { min: null, max: null };
 
 const charts = {
@@ -44,7 +49,7 @@ const state = {
   factorSheet: "",
   country: "",
   normalization: "raw",
-  decile: 1,
+  returnMode: "absolute",
   horizonMonths: 12,
   range: "all",
 };
@@ -60,12 +65,31 @@ function getSeriesKey(sheet, country) {
   return `${sheet}|||${country}`;
 }
 
-function getCrossVariableKey(country, date) {
-  return `${country}|||${date}`;
+function getCrossCountryKey(sheet, date) {
+  return `${sheet}|||${date}`;
 }
 
 function sortText(a, b) {
   return a.localeCompare(b);
+}
+
+function normalizeSheetName(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+function chooseReturnSheet() {
+  const normalizedToActual = new Map(allSheets.map((sheet) => [normalizeSheetName(sheet), sheet]));
+
+  for (const alias of RETURN_SHEET_ALIASES) {
+    const exact = normalizedToActual.get(alias);
+    if (exact) return exact;
+  }
+
+  const heuristic = allSheets.find((sheet) => /\btot(?:al)?\s*return\s*index\b/i.test(sheet));
+  if (heuristic) return heuristic;
+
+  const fallback = allSheets.find((sheet) => /\breturn\b/i.test(sheet) && /\bindex\b/i.test(sheet));
+  return fallback || "";
 }
 
 function parseDateMs(date) {
@@ -76,7 +100,7 @@ function buildIndexes() {
   allSheets = Object.keys(workbook.sheets).sort(sortText);
   sheetToCountries = new Map();
   seriesCache = new Map();
-  crossVariableCache = new Map();
+  crossCountryCache = new Map();
 
   let minMs = Infinity;
   let maxMs = -Infinity;
@@ -101,19 +125,15 @@ function buildIndexes() {
     }
 
     for (const row of ws.rows) {
+      const key = getCrossCountryKey(sheet, row.date);
+      if (!crossCountryCache.has(key)) crossCountryCache.set(key, []);
+
       for (const country of countries) {
         const raw = row.values[country];
         if (!Number.isFinite(raw)) continue;
-        const key = getCrossVariableKey(country, row.date);
-        if (!crossVariableCache.has(key)) crossVariableCache.set(key, []);
-        crossVariableCache.get(key).push(Number(raw));
+        crossCountryCache.get(key).push({ country, value: Number(raw) });
       }
     }
-  }
-
-  for (const [key, values] of crossVariableCache.entries()) {
-    values.sort((a, b) => a - b);
-    crossVariableCache.set(key, values);
   }
 
   dateDomain = {
@@ -151,32 +171,53 @@ function getRangeStartMs(maxMs, range) {
   return d.getTime();
 }
 
-function upperBound(sorted, value) {
-  let lo = 0;
-  let hi = sorted.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (sorted[mid] <= value) lo = mid + 1;
-    else hi = mid;
+function percentileVsCrossCountry(sheet, country, date, value) {
+  const arr = crossCountryCache.get(getCrossCountryKey(sheet, date));
+  if (!arr || arr.length < 2) return null;
+
+  const peers = [];
+  for (const peer of arr) {
+    if (peer.country === country) continue;
+    if (!Number.isFinite(peer.value)) continue;
+    peers.push(peer.value);
   }
-  return lo;
+
+  if (peers.length === 0) return null;
+
+  const mean = peers.reduce((sum, v) => sum + v, 0) / peers.length;
+  const variance = peers.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / peers.length;
+  const stdDev = Math.sqrt(variance);
+
+  if (stdDev === 0) return 0;
+  return (value - mean) / stdDev;
 }
 
-function percentileVsCrossVariable(country, date, value) {
-  const arr = crossVariableCache.get(getCrossVariableKey(country, date));
-  if (!arr || arr.length === 0) return null;
-  const ub = upperBound(arr, value);
-  return (ub / arr.length) * 100;
-}
+function buildExpandingZScoreSeries(rawSeries) {
+  let count = 0;
+  let mean = 0;
+  let m2 = 0;
 
-function computeZScore(values) {
-  const clean = values.filter(Number.isFinite);
-  if (clean.length < 2) {
-    return { mean: 0, std: 0 };
-  }
-  const mean = clean.reduce((a, b) => a + b, 0) / clean.length;
-  const variance = clean.reduce((a, b) => a + (b - mean) ** 2, 0) / clean.length;
-  return { mean, std: Math.sqrt(variance) };
+  return rawSeries.map((p) => {
+    const x = p.value;
+
+    count += 1;
+    const delta = x - mean;
+    mean += delta / count;
+    const delta2 = x - mean;
+    m2 += delta * delta2;
+
+    if (count < 2) {
+      return { ...p, signal: 0 };
+    }
+
+    const variance = m2 / count;
+    const std = Math.sqrt(variance);
+    if (!Number.isFinite(std) || std === 0) {
+      return { ...p, signal: 0 };
+    }
+
+    return { ...p, signal: (x - mean) / std };
+  });
 }
 
 function addMonthsIso(dateStr, months) {
@@ -259,7 +300,7 @@ function hydrateFromUrl() {
     factor: p.get("f"),
     country: p.get("c"),
     normalization: p.get("n"),
-    decile: Number(p.get("d")),
+    returnMode: p.get("m"),
     horizon: Number(p.get("h")),
     range: p.get("r"),
   };
@@ -288,8 +329,8 @@ function applyHydrated(payload) {
     state.normalization = payload.normalization;
   }
 
-  if (Number.isInteger(payload.decile) && payload.decile >= 1 && payload.decile <= 10) {
-    state.decile = payload.decile;
+  if (payload.returnMode && RETURN_MODE_OPTIONS.some((x) => x.value === payload.returnMode)) {
+    state.returnMode = payload.returnMode;
   }
 
   if (HORIZON_OPTIONS.includes(payload.horizon)) {
@@ -310,7 +351,7 @@ function persistState() {
     factor: state.factorSheet,
     country: state.country,
     normalization: state.normalization,
-    decile: state.decile,
+    returnMode: state.returnMode,
     horizon: state.horizonMonths,
     range: state.range,
   };
@@ -325,7 +366,7 @@ function persistState() {
   params.set("f", state.factorSheet);
   params.set("c", state.country);
   params.set("n", state.normalization);
-  params.set("d", String(state.decile));
+  params.set("m", state.returnMode);
   params.set("h", String(state.horizonMonths));
   params.set("r", state.range);
   window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
@@ -340,11 +381,7 @@ function syncRangeButtons() {
 function syncStaticControls() {
   buildSelectOptions(dom.factorSelect, allSheets, state.factorSheet);
   buildSelectOptions(dom.normalizationSelect, NORMALIZATION_OPTIONS, state.normalization);
-  buildSelectOptions(
-    dom.decileSelect,
-    Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: `Decile ${i + 1}` })),
-    String(state.decile)
-  );
+  buildSelectOptions(dom.returnModeSelect, RETURN_MODE_OPTIONS, state.returnMode);
   buildSelectOptions(
     dom.horizonSelect,
     HORIZON_OPTIONS.map((h) => ({ value: String(h), label: `${h} months` })),
@@ -366,27 +403,117 @@ function buildSignalSeries(rawSeries) {
   }
 
   if (state.normalization === "history_z") {
-    const { mean, std } = computeZScore(rawSeries.map((p) => p.value));
-    if (!Number.isFinite(std) || std === 0) {
-      return rawSeries.map((p) => ({ ...p, signal: 0 }));
-    }
-    return rawSeries.map((p) => ({ ...p, signal: (p.value - mean) / std }));
+    return buildExpandingZScoreSeries(rawSeries);
   }
 
   if (state.normalization === "cross_var_pct") {
     return rawSeries
-      .map((p) => ({ ...p, signal: percentileVsCrossVariable(state.country, p.date, p.value) }))
+      .map((p) => ({ ...p, signal: percentileVsCrossCountry(state.factorSheet, state.country, p.date, p.value) }))
       .filter((p) => Number.isFinite(p.signal));
   }
 
   return rawSeries.map((p) => ({ ...p, signal: p.value }));
 }
 
+function buildCumulativeSeries(rawSeries) {
+  if (!rawSeries.length) return { points: [], mode: "return" };
+
+  const firstNonZero = rawSeries.find((p) => Number.isFinite(p.value) && p.value !== 0);
+  if (!firstNonZero) return { points: [], mode: "return" };
+
+  const mode = firstNonZero.value > 0 ? "return" : "change";
+  const points = rawSeries
+    .filter((p) => Number.isFinite(p.value))
+    .map((p) => {
+      if (mode === "return") {
+        return { x: p.ms, y: p.value / firstNonZero.value - 1 };
+      }
+      return { x: p.ms, y: p.value - firstNonZero.value };
+    })
+    .filter((p) => Number.isFinite(p.y));
+
+  return { points, mode };
+}
+
+function buildMonthlyReturnSeries(levelSeries) {
+  if (!levelSeries.length) return [];
+
+  const ordered = levelSeries.slice().sort((a, b) => a.ms - b.ms);
+  const returns = [];
+  let prev = null;
+
+  for (const p of ordered) {
+    if (!Number.isFinite(p.value)) continue;
+
+    if (prev && Number.isFinite(prev.value) && prev.value !== 0) {
+      const monthlyReturn = p.value / prev.value - 1;
+      if (Number.isFinite(monthlyReturn)) {
+        returns.push({ date: p.date, ms: p.ms, value: monthlyReturn });
+      }
+    }
+
+    prev = p;
+  }
+
+  return returns;
+}
+
+function buildRelativeCumulativeSeries(returnSheet, country) {
+  if (!returnSheet || !country) return { points: [], mode: "return" };
+
+  const countries = getCountriesForFactor(returnSheet);
+  if (!countries.length) return { points: [], mode: "return" };
+
+  const avgByDate = new Map();
+  let ownMonthlyReturns = [];
+
+  for (const c of countries) {
+    const monthly = buildMonthlyReturnSeries(getSeries(returnSheet, c));
+    if (c === country) {
+      ownMonthlyReturns = monthly;
+    }
+
+    for (const p of monthly) {
+      if (!avgByDate.has(p.date)) {
+        avgByDate.set(p.date, { ms: p.ms, sum: 0, count: 0 });
+      }
+      const agg = avgByDate.get(p.date);
+      agg.sum += p.value;
+      agg.count += 1;
+    }
+  }
+
+  if (!ownMonthlyReturns.length) return { points: [], mode: "return" };
+
+  let ownWealth = 1;
+  let benchmarkWealth = 1;
+  const points = [];
+
+  for (const p of ownMonthlyReturns) {
+    const agg = avgByDate.get(p.date);
+    if (!agg || agg.count === 0) continue;
+
+    const avgMonthlyReturn = agg.sum / agg.count;
+    if (!Number.isFinite(avgMonthlyReturn)) continue;
+
+    ownWealth *= 1 + p.value;
+    benchmarkWealth *= 1 + avgMonthlyReturn;
+
+    if (!Number.isFinite(ownWealth) || !Number.isFinite(benchmarkWealth) || benchmarkWealth === 0) continue;
+
+    points.push({ x: p.ms, y: ownWealth / benchmarkWealth - 1 });
+  }
+
+  return { points, mode: "return" };
+}
+
 function computeTriptych() {
-  const rawSeries = getSeries(state.factorSheet, state.country);
+  const factorSeries = getSeries(state.factorSheet, state.country);
+  const returnSheet = chooseReturnSheet();
+  const returnSeries = returnSheet ? getSeries(returnSheet, state.country) : [];
   const startMs = getRangeStartMs(dateDomain.max, state.range);
 
-  if (!rawSeries.length) {
+  if (!factorSeries.length) {
     return {
       topPoints: [],
       middlePoints: [],
@@ -396,43 +523,76 @@ function computeTriptych() {
       sampleSize: 0,
       cumulativeMode: "return",
       normalizationLabel: getNormalizationLabel(state.normalization),
+      returnSheet,
+      hasReturnSeries: returnSeries.length > 0,
     };
   }
 
-  const signalSeries = buildSignalSeries(rawSeries);
+  const signalSeries = buildSignalSeries(factorSeries);
   const signalByDate = new Map(signalSeries.map((p) => [p.date, p.signal]));
-  const rawByDate = new Map(rawSeries.map((p) => [p.date, p.value]));
+  const returnByDate = new Map(returnSeries.map((p) => [p.date, p.value]));
+  const { points: cumulativeAll, mode: cumulativeMode } =
+    state.returnMode === "relative"
+      ? buildRelativeCumulativeSeries(returnSheet, state.country)
+      : buildCumulativeSeries(returnSeries);
 
-  const firstNonZero = rawSeries.find((p) => Number.isFinite(p.value) && p.value !== 0);
-  const cumulativeMode = firstNonZero && firstNonZero.value > 0 ? "return" : "change";
-  const cumulativeAll = rawSeries
-    .filter((p) => Number.isFinite(p.value))
-    .map((p) => {
-      if (!firstNonZero) return { x: p.ms, y: null };
-      if (cumulativeMode === "return") {
-        return { x: p.ms, y: p.value / firstNonZero.value - 1 };
+  const avgForwardReturnByDate = new Map();
+  if (state.returnMode === "relative" && returnSheet) {
+    const countries = getCountriesForFactor(returnSheet);
+    for (const c of countries) {
+      const cSeries = getSeries(returnSheet, c);
+      const cReturnByDate = new Map(cSeries.map((p) => [p.date, p.value]));
+
+      for (const p of cSeries) {
+        const baseLevel = p.value;
+        if (!Number.isFinite(baseLevel) || baseLevel === 0) continue;
+
+        const targetDate = addMonthsIso(p.date, state.horizonMonths);
+        if (!targetDate) continue;
+
+        const targetLevel = cReturnByDate.get(targetDate);
+        if (!Number.isFinite(targetLevel)) continue;
+
+        const fwdRet = targetLevel / baseLevel - 1;
+        if (!avgForwardReturnByDate.has(p.date)) {
+          avgForwardReturnByDate.set(p.date, { sum: 0, count: 0 });
+        }
+        const agg = avgForwardReturnByDate.get(p.date);
+        agg.sum += fwdRet;
+        agg.count += 1;
       }
-      return { x: p.ms, y: p.value - firstNonZero.value };
-    })
-    .filter((p) => Number.isFinite(p.y));
+    }
+  }
 
   const forwardRecords = [];
-  for (const p of rawSeries) {
-    if (!Number.isFinite(p.value) || p.value === 0) continue;
+  for (const p of factorSeries) {
     const signal = signalByDate.get(p.date);
     if (!Number.isFinite(signal)) continue;
+
+    const baseReturnLevel = returnByDate.get(p.date);
+    if (!Number.isFinite(baseReturnLevel) || baseReturnLevel === 0) continue;
 
     const targetDate = addMonthsIso(p.date, state.horizonMonths);
     if (!targetDate) continue;
 
-    const target = rawByDate.get(targetDate);
-    if (!Number.isFinite(target)) continue;
+    const targetReturnLevel = returnByDate.get(targetDate);
+    if (!Number.isFinite(targetReturnLevel)) continue;
+
+    let forwardReturn = targetReturnLevel / baseReturnLevel - 1;
+
+    if (state.returnMode === "relative") {
+      const agg = avgForwardReturnByDate.get(p.date);
+      if (agg && agg.count > 0) {
+        const avgFwdRet = agg.sum / agg.count;
+        forwardReturn = forwardReturn - avgFwdRet;
+      }
+    }
 
     forwardRecords.push({
       date: p.date,
       ms: p.ms,
       signal,
-      forwardReturn: target / p.value - 1,
+      forwardReturn,
     });
   }
 
@@ -442,8 +602,11 @@ function computeTriptych() {
     decile: assignDecile(r.signal, thresholds),
   }));
 
+  const inRange = (ms) => (startMs ? ms >= startMs : true);
+  const rangedRecords = recordsWithDeciles.filter((r) => inRange(r.ms));
+
   const buckets = Array.from({ length: 10 }, () => []);
-  recordsWithDeciles.forEach((r) => {
+  rangedRecords.forEach((r) => {
     if (!r.decile) return;
     buckets[r.decile - 1].push(r.forwardReturn);
   });
@@ -456,17 +619,17 @@ function computeTriptych() {
     return { count: vals.length, avg, med, hitRate };
   });
 
-  const inRange = (ms) => (startMs ? ms >= startMs : true);
-
   const topPoints = signalSeries
     .filter((p) => inRange(p.ms))
     .map((p) => ({ x: p.ms, y: p.signal }));
 
   const middlePoints = cumulativeAll.filter((p) => inRange(p.x));
 
-  const bottomPoints = recordsWithDeciles
-    .filter((r) => inRange(r.ms) && r.decile === state.decile)
-    .map((r) => ({ x: r.ms, y: r.forwardReturn }));
+  const bottomPoints = decileStats.map((row, idx) => ({
+    x: idx + 1,
+    y: row.avg,
+    count: row.count,
+  }));
 
   return {
     topPoints,
@@ -474,9 +637,11 @@ function computeTriptych() {
     bottomPoints,
     decileStats,
     startMs,
-    sampleSize: recordsWithDeciles.length,
+    sampleSize: rangedRecords.length,
     cumulativeMode,
     normalizationLabel: getNormalizationLabel(state.normalization),
+    returnSheet,
+    hasReturnSeries: returnSeries.length > 0,
   };
 }
 
@@ -564,6 +729,20 @@ function ensureCharts() {
         ...baseChartOptions(),
         scales: {
           ...baseChartOptions().scales,
+          x: {
+            ...baseChartOptions().scales.x,
+            min: 0.5,
+            max: 10.5,
+            ticks: {
+              maxTicksLimit: 10,
+              stepSize: 1,
+              callback: (value) => {
+                const decile = Number(value);
+                if (!Number.isInteger(decile) || decile < 1 || decile > 10) return "";
+                return `D${decile}`;
+              },
+            },
+          },
           y: {
             ticks: { callback: (v) => formatPct(Number(v), 1) },
           },
@@ -578,7 +757,6 @@ function renderDecileTable(stats) {
 
   stats.forEach((row, idx) => {
     const tr = document.createElement("tr");
-    if (idx + 1 === state.decile) tr.classList.add("active");
 
     const d = document.createElement("td");
     d.textContent = `Decile ${idx + 1}`;
@@ -613,15 +791,28 @@ function render() {
   const computed = computeTriptych();
 
   const topLabel = `${state.country} - ${state.factorSheet}`;
-  const middleLabel = `Cumulative return`;
+  const middleLabel =
+    state.returnMode === "relative"
+      ? `${state.country} relative cumulative return`
+      : `${state.country} cumulative return`;
 
   dom.topTitle.textContent = `${topLabel} (${computed.normalizationLabel})`;
-  dom.midTitle.textContent = `Cumulative Return To ${state.factorSheet}`;
-  dom.bottomTitle.textContent = `Decile ${state.decile} Run (${state.horizonMonths}M forward)`;
+  if (state.returnMode === "relative") {
+    dom.midTitle.textContent = computed.returnSheet
+      ? `Relative Cumulative Return: ${state.country} vs all-country average (${computed.returnSheet.trim()})`
+      : `Relative Cumulative Return: ${state.country} vs all-country average`;
+  } else {
+    dom.midTitle.textContent = computed.returnSheet
+      ? `Cumulative Return To ${state.country} (${computed.returnSheet.trim()})`
+      : `Cumulative Return To ${state.country}`;
+  }
+  dom.bottomTitle.textContent = `${state.horizonMonths}M Forward Return by Decile`;
 
   dom.summary.textContent = [
     `Country: ${state.country || "-"}`,
     `Factor: ${state.factorSheet || "-"}`,
+    `Return source: ${computed.returnSheet ? computed.returnSheet.trim() : "-"}`,
+    `Return mode: ${state.returnMode === "relative" ? "Relative vs all-country average" : "Absolute"}`,
     `Normalization: ${computed.normalizationLabel}`,
     `Sample points: ${computed.sampleSize}`,
     `Range: ${state.range.toUpperCase()}`,
@@ -636,8 +827,8 @@ function render() {
   charts.top.options.scales.x.max = xMax;
   charts.middle.options.scales.x.min = xMin;
   charts.middle.options.scales.x.max = xMax;
-  charts.bottom.options.scales.x.min = xMin;
-  charts.bottom.options.scales.x.max = xMax;
+  charts.bottom.options.scales.x.min = 0.5;
+  charts.bottom.options.scales.x.max = 10.5;
 
   if (state.normalization === "cross_var_pct") {
     charts.top.options.scales.y.ticks.callback = (v) => `${Number(v).toFixed(0)}%`;
@@ -653,7 +844,7 @@ function render() {
   charts.top.options.plugins.tooltip.callbacks.label = (ctx) => {
     const val = Number(ctx.parsed.y);
     if (state.normalization === "cross_var_pct") {
-      return `${topLabel}: ${val.toFixed(1)} percentile`;
+      return `${topLabel}: ${val.toFixed(2)} σ`;
     }
     return `${topLabel}: ${val.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
   };
@@ -668,7 +859,15 @@ function render() {
 
   charts.bottom.options.plugins.tooltip.callbacks.label = (ctx) => {
     const val = Number(ctx.parsed.y);
-    return `Decile ${state.decile} run: ${formatPct(val, 2)}`;
+    const obs = Number(ctx.raw?.count);
+    const obsText = Number.isFinite(obs) ? ` (${obs} obs)` : "";
+    return `Avg ${state.horizonMonths}M forward return: ${formatPct(val, 2)}${obsText}`;
+  };
+  charts.bottom.options.plugins.tooltip.callbacks.title = (items) => {
+    if (!items || !items.length) return "";
+    const decile = Number(items[0].parsed.x);
+    if (!Number.isInteger(decile)) return "";
+    return `Decile ${decile}`;
   };
 
   charts.top.data.datasets = [
@@ -701,13 +900,20 @@ function render() {
 
   charts.bottom.data.datasets = [
     {
-      label: `Decile ${state.decile} run`,
+      label: `Avg ${state.horizonMonths}M forward return`,
       data: computed.bottomPoints,
-      backgroundColor: computed.bottomPoints.map((p) => (p.y >= 0 ? "rgba(24, 116, 63, 0.72)" : "rgba(160, 60, 45, 0.72)")),
-      borderColor: computed.bottomPoints.map((p) => (p.y >= 0 ? "#18743f" : "#a03c2d")),
+      backgroundColor: computed.bottomPoints.map((p) => {
+        if (!Number.isFinite(p.y)) return "rgba(110, 110, 110, 0.2)";
+        if (p.y >= 0) return "rgba(24, 116, 63, 0.68)";
+        return "rgba(160, 60, 45, 0.68)";
+      }),
+      borderColor: computed.bottomPoints.map((p) => {
+        if (!Number.isFinite(p.y)) return "rgba(110, 110, 110, 0.6)";
+        return p.y >= 0 ? "#18743f" : "#a03c2d";
+      }),
       borderWidth: 1,
-      barThickness: 8,
-      maxBarThickness: 12,
+      barThickness: 18,
+      maxBarThickness: 24,
     },
   ];
 
@@ -717,7 +923,11 @@ function render() {
 
   renderDecileTable(computed.decileStats);
 
-  if (computed.sampleSize === 0) {
+  if (!computed.returnSheet) {
+    setBanner("No return-index sheet found (expected a sheet like 'Tot Return Index').", true);
+  } else if (!computed.hasReturnSeries) {
+    setBanner(`No return series available for ${state.country} in ${computed.returnSheet.trim()}.`, true);
+  } else if (computed.sampleSize === 0) {
     setBanner("No forward-return sample found for this variable and horizon.", true);
   } else {
     setBanner("");
@@ -743,8 +953,8 @@ function attachEvents() {
     render();
   });
 
-  dom.decileSelect.addEventListener("change", () => {
-    state.decile = Number(dom.decileSelect.value);
+  dom.returnModeSelect.addEventListener("change", () => {
+    state.returnMode = dom.returnModeSelect.value;
     render();
   });
 
@@ -814,7 +1024,7 @@ async function init() {
     syncCountryControl();
 
     dom.normalizationSelect.value = state.normalization;
-    dom.decileSelect.value = String(state.decile);
+    dom.returnModeSelect.value = state.returnMode;
     dom.horizonSelect.value = String(state.horizonMonths);
 
     attachEvents();

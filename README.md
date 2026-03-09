@@ -1,6 +1,6 @@
-# Visualization
+# Triptych
 
-Repository for **T2 Factor Visualizer** and **Triptych**: local-first web applications that turn a multi-sheet Excel workbook into interactive time-series analysis interfaces.
+Repository for **Triptych**: a local-first web application that turns multi-sheet Excel workbooks into interactive time-series analysis interfaces.
 
 The app is built for comparing many variables (factors) across many countries/markets over time, with fast filtering, transformations, and shareable state.
 
@@ -138,8 +138,8 @@ This prevents accidental “too many lines x too many points” crashes.
 ## Triptych App
 `Triptych` is a 3-panel app at [`app/triptych.html`](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/triptych.html):
 - Top panel: one variable (raw or normalized)
-- Middle panel: cumulative return of that variable
-- Bottom panel: decile run of `N`-month forward returns
+- Middle panel: cumulative return of selected country (absolute or relative vs all-country average)
+- Bottom panel: `N`-month forward return by signal decile (all deciles)
 
 Run it with the same static server and open:
 - `http://127.0.0.1:8000/triptych.html`

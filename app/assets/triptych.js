@@ -1,6 +1,8 @@
 const DATA_PATH = "./data/t2_master.json";
 const STORAGE_KEY = "triptych:last";
 
+
+
 const RANGE_VALUES = new Set(["all", "10y", "5y", "3y", "1y"]);
 const HORIZON_OPTIONS = [1, 3, 6, 12, 24, 36];
 const NORMALIZATION_OPTIONS = [
@@ -631,11 +633,21 @@ function computeTriptych() {
     count: row.count,
   }));
 
+  /* --- current decile: decile that the most recent signal falls into --- */
+  let currentDecile = null;
+  if (signalSeries.length && thresholds.length) {
+    const latestSignal = signalSeries[signalSeries.length - 1].signal;
+    if (Number.isFinite(latestSignal)) {
+      currentDecile = assignDecile(latestSignal, thresholds);
+    }
+  }
+
   return {
     topPoints,
     middlePoints,
     bottomPoints,
     decileStats,
+    currentDecile,
     startMs,
     sampleSize: rangedRecords.length,
     cumulativeMode,
@@ -724,24 +736,27 @@ function ensureCharts() {
   if (!charts.bottom) {
     charts.bottom = new Chart(dom.bottomCanvas, {
       type: "bar",
-      data: { datasets: [] },
+      data: { labels: [], datasets: [] },
       options: {
-        ...baseChartOptions(),
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "nearest", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            mode: "nearest",
+            intersect: false,
+          },
+        },
         scales: {
-          ...baseChartOptions().scales,
           x: {
-            ...baseChartOptions().scales.x,
-            min: 0.5,
-            max: 10.5,
+            type: "category",
             ticks: {
-              maxTicksLimit: 10,
-              stepSize: 1,
-              callback: (value) => {
-                const decile = Number(value);
-                if (!Number.isInteger(decile) || decile < 1 || decile > 10) return "";
-                return `D${decile}`;
-              },
+              font: { size: 13, weight: "bold" },
+              padding: 6,
             },
+            grid: { display: false },
           },
           y: {
             ticks: { callback: (v) => formatPct(Number(v), 1) },
@@ -823,12 +838,18 @@ function render() {
   const xMin = computed.startMs || undefined;
   const xMax = dateDomain.max || undefined;
 
+  /* Each chart sets its own x-max from its data so there's no empty trailing space */
+  const topXMax = computed.topPoints.length
+    ? computed.topPoints[computed.topPoints.length - 1].x
+    : xMax;
+  const midXMax = computed.middlePoints.length
+    ? computed.middlePoints[computed.middlePoints.length - 1].x
+    : xMax;
+
   charts.top.options.scales.x.min = xMin;
-  charts.top.options.scales.x.max = xMax;
+  charts.top.options.scales.x.max = topXMax;
   charts.middle.options.scales.x.min = xMin;
-  charts.middle.options.scales.x.max = xMax;
-  charts.bottom.options.scales.x.min = 0.5;
-  charts.bottom.options.scales.x.max = 10.5;
+  charts.middle.options.scales.x.max = midXMax;
 
   if (state.normalization === "cross_var_pct") {
     charts.top.options.scales.y.ticks.callback = (v) => `${Number(v).toFixed(0)}%`;
@@ -859,15 +880,13 @@ function render() {
 
   charts.bottom.options.plugins.tooltip.callbacks.label = (ctx) => {
     const val = Number(ctx.parsed.y);
-    const obs = Number(ctx.raw?.count);
+    const obs = computed.decileStats[ctx.dataIndex]?.count;
     const obsText = Number.isFinite(obs) ? ` (${obs} obs)` : "";
     return `Avg ${state.horizonMonths}M forward return: ${formatPct(val, 2)}${obsText}`;
   };
   charts.bottom.options.plugins.tooltip.callbacks.title = (items) => {
     if (!items || !items.length) return "";
-    const decile = Number(items[0].parsed.x);
-    if (!Number.isInteger(decile)) return "";
-    return `Decile ${decile}`;
+    return `Decile ${items[0].dataIndex + 1}`;
   };
 
   charts.top.data.datasets = [
@@ -898,22 +917,29 @@ function render() {
     },
   ];
 
+  const cd = computed.currentDecile;
+  const decileLabels = Array.from({ length: 10 }, (_, i) => String(i + 1));
+  const decileValues = computed.bottomPoints.map((p) => p.y);
+  charts.bottom.data.labels = decileLabels;
   charts.bottom.data.datasets = [
     {
       label: `Avg ${state.horizonMonths}M forward return`,
-      data: computed.bottomPoints,
+      data: decileValues,
       backgroundColor: computed.bottomPoints.map((p) => {
         if (!Number.isFinite(p.y)) return "rgba(110, 110, 110, 0.2)";
         if (p.y >= 0) return "rgba(24, 116, 63, 0.68)";
         return "rgba(160, 60, 45, 0.68)";
       }),
-      borderColor: computed.bottomPoints.map((p) => {
+      borderColor: computed.bottomPoints.map((p, i) => {
+        if (cd && i + 1 === cd) return "#f5a623";
         if (!Number.isFinite(p.y)) return "rgba(110, 110, 110, 0.6)";
         return p.y >= 0 ? "#18743f" : "#a03c2d";
       }),
-      borderWidth: 1,
-      barThickness: 18,
-      maxBarThickness: 24,
+      borderWidth: computed.bottomPoints.map((_p, i) =>
+        cd && i + 1 === cd ? 3 : 1
+      ),
+      barPercentage: 0.85,
+      categoryPercentage: 0.9,
     },
   ];
 

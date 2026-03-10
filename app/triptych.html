@@ -1,102 +1,105 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Triptych</title>
-    <link rel="stylesheet" href="./assets/triptych.css" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-    <script src="./assets/triptych.js" defer></script>
-  </head>
-  <body>
-    <div id="banner" class="banner" aria-live="polite"></div>
 
-    <main class="shell">
-      <header class="hero">
-        <div>
-          <h1>Triptych</h1>
-          <p class="sub">Factor exposure, return-to-factor signal, and decile run analysis.</p>
-        </div>
-        <a class="navLink" href="./index.html">Open T2 Visualizer</a>
-      </header>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Triptych</title>
+  <link rel="stylesheet" href="./assets/triptych.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+  <script src="./assets/triptych.js" defer></script>
+</head>
 
-      <section class="controls" aria-label="Triptych controls">
-        <div class="field">
-          <label for="factorSelect">Top Panel Factor</label>
-          <select id="factorSelect"></select>
-        </div>
+<body>
+  <div id="banner" class="banner" aria-live="polite"></div>
 
-        <div class="field">
-          <label for="normalizationSelect">Top Panel Normalization</label>
-          <select id="normalizationSelect"></select>
-        </div>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <h1>Triptych</h1>
+        <p class="sub">Factor exposure, return-to-factor signal, and decile run analysis.</p>
+      </div>
+      <a class="navLink" href="./index.html">Open T2 Visualizer</a>
+    </header>
 
-        <div class="field">
-          <label for="countrySelect">Country</label>
-          <select id="countrySelect"></select>
-        </div>
+    <section class="controls" aria-label="Triptych controls">
+      <div class="field">
+        <label for="factorSelect">Top Panel Factor</label>
+        <select id="factorSelect"></select>
+      </div>
 
-        <div class="field small">
-          <label for="returnModeSelect">Middle Return</label>
-          <select id="returnModeSelect"></select>
-        </div>
+      <div class="field">
+        <label for="normalizationSelect">Top Panel Normalization</label>
+        <select id="normalizationSelect"></select>
+      </div>
 
-        <div class="field small">
-          <label for="horizonSelect">Forward Horizon</label>
-          <select id="horizonSelect"></select>
-        </div>
+      <div class="field">
+        <label for="countrySelect">Country</label>
+        <select id="countrySelect"></select>
+      </div>
 
-        <div class="ranges" role="group" aria-label="Date Range">
-          <button type="button" class="rangeBtn" data-range="all">All</button>
-          <button type="button" class="rangeBtn" data-range="10y">10Y</button>
-          <button type="button" class="rangeBtn" data-range="5y">5Y</button>
-          <button type="button" class="rangeBtn" data-range="3y">3Y</button>
-          <button type="button" class="rangeBtn" data-range="1y">1Y</button>
-        </div>
-      </section>
+      <div class="field small">
+        <label for="returnModeSelect">Middle Return</label>
+        <select id="returnModeSelect"></select>
+      </div>
 
-      <section id="summary" class="summary" aria-live="polite"></section>
+      <div class="field small">
+        <label for="horizonSelect">Forward Horizon</label>
+        <select id="horizonSelect"></select>
+      </div>
 
-      <section class="panel">
-        <div class="panelHead">
-          <h2 id="topTitle">Top Panel</h2>
-        </div>
-        <div class="canvasWrap"><canvas id="topChart"></canvas></div>
-      </section>
+      <div class="ranges" role="group" aria-label="Date Range">
+        <button type="button" class="rangeBtn" data-range="all">All</button>
+        <button type="button" class="rangeBtn" data-range="10y">10Y</button>
+        <button type="button" class="rangeBtn" data-range="5y">5Y</button>
+        <button type="button" class="rangeBtn" data-range="3y">3Y</button>
+        <button type="button" class="rangeBtn" data-range="1y">1Y</button>
+      </div>
+    </section>
 
-      <section class="panel">
-        <div class="panelHead">
-          <h2 id="midTitle">Middle Panel</h2>
-        </div>
-        <div class="canvasWrap"><canvas id="middleChart"></canvas></div>
-      </section>
+    <section id="summary" class="summary" aria-live="polite"></section>
 
-      <section class="panel">
-        <div class="panelHead">
-          <h2 id="bottomTitle">Bottom Panel</h2>
-        </div>
-        <div class="canvasWrap"><canvas id="bottomChart"></canvas></div>
-      </section>
+    <section class="panel">
+      <div class="panelHead">
+        <h2 id="topTitle">Top Panel</h2>
+      </div>
+      <div class="canvasWrap"><canvas id="topChart"></canvas></div>
+    </section>
 
-      <section class="panel">
-        <div class="panelHead">
-          <h2>Decile Stats</h2>
-        </div>
-        <div class="tableWrap">
-          <table id="decileTable">
-            <thead>
-              <tr>
-                <th>Decile</th>
-                <th>Obs</th>
-                <th>Avg Fwd Return</th>
-                <th>Median</th>
-                <th>Hit Rate</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-    </main>
-  </body>
+    <section class="panel">
+      <div class="panelHead">
+        <h2 id="midTitle">Middle Panel</h2>
+      </div>
+      <div class="canvasWrap"><canvas id="middleChart"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <div class="panelHead">
+        <h2 id="bottomTitle">Bottom Panel</h2>
+      </div>
+      <div class="canvasWrap"><canvas id="bottomChart"></canvas></div>
+    </section>
+
+    <section class="panel">
+      <div class="panelHead">
+        <h2>Decile Stats</h2>
+      </div>
+      <div class="tableWrap">
+        <table id="decileTable">
+          <thead>
+            <tr>
+              <th>Decile</th>
+              <th>Obs</th>
+              <th>Avg Fwd Return</th>
+              <th>Median</th>
+              <th>Hit Rate</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+
 </html>

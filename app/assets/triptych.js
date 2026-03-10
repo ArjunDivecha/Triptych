@@ -836,20 +836,20 @@ function render() {
   ensureCharts();
 
   const xMin = computed.startMs || undefined;
-  const xMax = dateDomain.max || undefined;
 
-  /* Each chart sets its own x-max from its data so there's no empty trailing space */
-  const topXMax = computed.topPoints.length
+  /* Use the same x-max for both top and middle so their time scales align */
+  const topEnd = computed.topPoints.length
     ? computed.topPoints[computed.topPoints.length - 1].x
-    : xMax;
-  const midXMax = computed.middlePoints.length
+    : 0;
+  const midEnd = computed.middlePoints.length
     ? computed.middlePoints[computed.middlePoints.length - 1].x
-    : xMax;
+    : 0;
+  const sharedXMax = Math.max(topEnd, midEnd) || (dateDomain.max || undefined);
 
   charts.top.options.scales.x.min = xMin;
-  charts.top.options.scales.x.max = topXMax;
+  charts.top.options.scales.x.max = sharedXMax;
   charts.middle.options.scales.x.min = xMin;
-  charts.middle.options.scales.x.max = midXMax;
+  charts.middle.options.scales.x.max = sharedXMax;
 
   if (state.normalization === "cross_var_pct") {
     charts.top.options.scales.y.ticks.callback = (v) => `${Number(v).toFixed(0)}%`;

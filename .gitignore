@@ -2,3 +2,16 @@ __pycache__/
 *.pyc
 .DS_Store
 Triptych.app/
+app/data/backups/
+.playwright-cli/
+.vercel
+
+# Local-only / editor / build artifacts — not part of the app itself
+node_modules/
+test-results/
+.cursor/
+*.code-workspace
+junk.py
+
+# Auto-injected agent-session context (local bookkeeping)
+.pks/

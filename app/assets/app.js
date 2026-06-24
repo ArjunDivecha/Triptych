@@ -1,38 +1,76 @@
-const DATA_PATH = "./data/t2_master.json";
+/*
+=============================================================================
+FILE: app.js
+=============================================================================
+
+DESCRIPTION:
+Frontend logic for the Factor Visualizer tab: multi-select charting of any
+combination of sheets (factors) and countries from the T2 dataset. Supports
+command-style queries ("India Trailing PE") with fuzzy suggestions, five
+axis modes (raw / indexed / static z / expanding z / cross-sectional),
+date-range windows, a per-series visibility manager, undo, and URL-encoded
+shareable state. URL parameters are namespaced v* (vs, vc, vr, va, vh) so
+they never collide with the Triptych tab's t* parameters.
+
+INPUT FILES (fetched over HTTP at runtime):
+- /Users/arjundivecha/Dropbox/AAA Backup/A Working/Triptych/app/data/t2_master.json
+  (loaded once via the shared window.__t2DataPromise created in triptych.js)
+
+OUTPUT FILES:
+- None. State persists to the URL and localStorage only.
+=============================================================================
+*/
+
+(() => {
+const C = window.T2Core;
+if (!C) throw new Error("core.js failed to load — required before app.js");
 const URL_MAX = 1800;
 
 const dom = {
   banner: document.getElementById("banner"),
-  summary: document.getElementById("summary"),
-  sheetSelect: document.getElementById("sheetSelect"),
-  countrySelect: document.getElementById("countrySelect"),
-  sheetFilter: document.getElementById("sheetFilter"),
-  countryFilter: document.getElementById("countryFilter"),
-  commandInput: document.getElementById("commandInput"),
-  commandApplyBtn: document.getElementById("commandApplyBtn"),
-  suggestions: document.getElementById("suggestions"),
-  selectFilteredSheetsBtn: document.getElementById("selectFilteredSheetsBtn"),
-  clearSheetsBtn: document.getElementById("clearSheetsBtn"),
-  selectFilteredCountriesBtn: document.getElementById("selectFilteredCountriesBtn"),
-  clearCountriesBtn: document.getElementById("clearCountriesBtn"),
-  undoBtn: document.getElementById("undoBtn"),
-  clearAllBtn: document.getElementById("clearAllBtn"),
-  seriesManager: document.getElementById("seriesManager"),
-  emptyState: document.getElementById("emptyState"),
-  chartCanvas: document.getElementById("seriesChart"),
-  rangeButtons: Array.from(document.querySelectorAll(".rangeBtn")),
-  axisButtons: Array.from(document.querySelectorAll(".axisBtn")),
+  summary: document.getElementById("vizSummary"),
+  sheetList: document.getElementById("vizSheetList"),
+  countryList: document.getElementById("vizCountryList"),
+  sheetFilter: document.getElementById("vizSheetFilter"),
+  countryFilter: document.getElementById("vizCountryFilter"),
+  commandInput: document.getElementById("vizCommandInput"),
+  commandApplyBtn: document.getElementById("vizCommandApplyBtn"),
+  suggestions: document.getElementById("vizSuggestions"),
+  selectFilteredSheetsBtn: document.getElementById("vizSelectFilteredSheetsBtn"),
+  clearSheetsBtn: document.getElementById("vizClearSheetsBtn"),
+  selectFilteredCountriesBtn: document.getElementById("vizSelectFilteredCountriesBtn"),
+  clearCountriesBtn: document.getElementById("vizClearCountriesBtn"),
+  undoBtn: document.getElementById("vizUndoBtn"),
+  clearAllBtn: document.getElementById("vizClearAllBtn"),
+  seriesManager: document.getElementById("vizSeriesManager"),
+  emptyState: document.getElementById("vizEmptyState"),
+  chartCanvas: document.getElementById("vizSeriesChart"),
+  rangeButtons: Array.from(document.querySelectorAll(".vizRangeBtn")),
+  axisButtons: Array.from(document.querySelectorAll(".vizAxisBtn")),
 };
 
 const runtimeTabId = (window.crypto && crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
 
 let workbook;
 let chart;
+// Shared index structures (built once via T2Core.buildIndexes, reused by the
+// Deep-Dive tab through T2Core.indexes). Replaces the per-tab caches so the
+// index layer exists once in memory, not twice. crossCountryCache is lazy.
+let indexes = null;
 let allSheets = [];
 let allCountries = [];
-let sheetToCountries = new Map();
-let seriesCache = new Map();
 let dateDomain = { min: null, max: null };
+
+// Shared helpers from core.
+const getSeriesKey = C.getSeriesKey;
+const normalizeToken = C.normalizeToken;
+const sortText = C.sortText;
+
+function percentileVsCrossCountry(sheet, country, date, value) {
+  return C.percentileVsCrossCountry(indexes, sheet, country, date, value);
+}
+
+const buildExpandingZScoreSeries = C.buildExpandingZScoreSeries;
 
 const state = {
   selectedSheets: new Set(),
@@ -50,14 +88,8 @@ let countryFilterTerm = "";
 let commandDebounce;
 let urlDebounce;
 
-function normalizeToken(text) {
-  return String(text)
-    .toLowerCase()
-    .replace(/[^\w\s/]+/g, " ")
-    .replace(/[\/]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// normalizeToken is shared via T2Core (aliased above) — one canonical,
+// slash-collapsing version across both tabs.
 
 function canonicalizeQuery(text) {
   return normalizeToken(text)
@@ -86,6 +118,10 @@ function setBanner(message = "", warn = false) {
   dom.banner.classList.toggle("show", Boolean(message));
   if (warn) dom.banner.classList.add("warn");
   else dom.banner.classList.remove("warn");
+  // Keep a CSS variable in sync with the banner height so the sticky sidebar
+  // never slides under the sticky banner (mirrors triptych.js).
+  const h = message ? 42 : 0;
+  document.documentElement.style.setProperty("--banner-h", `${h}px`);
 }
 
 function addUndoSnapshot() {
@@ -113,9 +149,7 @@ function restoreSnapshot(snap) {
   syncUIAndRender();
 }
 
-function getSeriesKey(sheet, country) {
-  return `${sheet}|||${country}`;
-}
+// getSeriesKey is shared via T2Core (aliased above).
 
 function hashCode(text) {
   let hash = 0;
@@ -133,46 +167,20 @@ function hslColor(text) {
   return `hsl(${h} ${s}% ${l}%)`;
 }
 
+// Build (or reuse) the single shared index set from T2Core so this tab and
+// the Deep-Dive tab share one set of caches in memory. crossCountryCache is
+// lazy (built on first cross-country request via T2Core.ensureCrossCountry).
 function buildIndexes() {
-  allSheets = Object.keys(workbook.sheets).sort((a, b) => a.localeCompare(b));
-  sheetToCountries = new Map();
-  seriesCache = new Map();
-  const countrySet = new Set();
-  let minMs = Infinity;
-  let maxMs = -Infinity;
-
-  for (const sheet of allSheets) {
-    const ws = workbook.sheets[sheet];
-    const countries = Array.from(new Set(ws.countries)).sort((a, b) => a.localeCompare(b));
-    sheetToCountries.set(sheet, new Set(countries));
-    countries.forEach((c) => countrySet.add(c));
-
-    for (const country of countries) {
-      const points = [];
-      for (const row of ws.rows) {
-        const raw = row.values[country];
-        if (raw === null || raw === undefined || Number.isNaN(raw)) continue;
-        const ms = Date.parse(row.date);
-        if (Number.isNaN(ms)) continue;
-        points.push({ date: row.date, ms, value: Number(raw) });
-        if (ms < minMs) minMs = ms;
-        if (ms > maxMs) maxMs = ms;
-      }
-      seriesCache.set(getSeriesKey(sheet, country), points);
-    }
-  }
-
-  allCountries = Array.from(countrySet).sort((a, b) => a.localeCompare(b));
-  dateDomain = {
-    min: Number.isFinite(minMs) ? minMs : null,
-    max: Number.isFinite(maxMs) ? maxMs : null,
-  };
+  indexes = C.indexes || (C.indexes = C.buildIndexes(workbook));
+  allSheets = indexes.allSheets;
+  allCountries = indexes.allCountries;
+  dateDomain = indexes.dateDomain;
 }
 
 function getValidCountryUnion(selectedSheets) {
   const union = new Set();
   selectedSheets.forEach((sheet) => {
-    const set = sheetToCountries.get(sheet);
+    const set = indexes.sheetToCountries.get(sheet);
     if (!set) return;
     set.forEach((c) => union.add(c));
   });
@@ -249,7 +257,7 @@ function applyHydratedState(payload) {
   if (payload.range && ["all", "10y", "5y", "3y", "1y"].includes(payload.range)) {
     state.activeRange = payload.range;
   }
-  if (payload.axis && ["raw", "indexed", "zscore"].includes(payload.axis)) {
+  if (payload.axis && ["raw", "indexed", "zscore", "zscore_expanding", "cross_sectional"].includes(payload.axis)) {
     state.axisMode = payload.axis;
   }
 
@@ -270,9 +278,9 @@ function applyHydratedState(payload) {
 
 function hydrateFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const sheetIdx = strictIntList(params.get("s"), 80);
-  const countryIdx = strictIntList(params.get("c"), 80);
-  const hiddenRaw = params.get("h") || "";
+  const sheetIdx = strictIntList(params.get("vs"), 80);
+  const countryIdx = strictIntList(params.get("vc"), 80);
+  const hiddenRaw = params.get("vh") || "";
   const hiddenPairs = hiddenRaw
     .split(".")
     .slice(0, 500)
@@ -286,48 +294,24 @@ function hydrateFromUrl() {
   return {
     sheets: sheetIdx,
     countries: countryIdx,
-    range: params.get("r"),
-    axis: params.get("a"),
+    range: params.get("vr"),
+    axis: params.get("va"),
     hidden: hiddenPairs,
     partial: params.get("partial") === "1",
   };
 }
 
 function hydrateFromStorage() {
-  try {
-    const raw = localStorage.getItem("t2viz:last");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.sheets) || !Array.isArray(parsed.countries)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-function persistToStorage(payload) {
-  try {
-    const now = Date.now();
-    localStorage.setItem("t2viz:last", JSON.stringify(payload));
-    localStorage.setItem(`t2viz:tab:${runtimeTabId}`, JSON.stringify({ ...payload, ts: now }));
-    const tabKeys = Object.keys(localStorage).filter((k) => k.startsWith("t2viz:tab:"));
-    const items = tabKeys
-      .map((k) => {
-        try {
-          return { key: k, ts: JSON.parse(localStorage.getItem(k) || "{}").ts || 0 };
-        } catch {
-          return { key: k, ts: 0 };
-        }
-      })
-      .sort((a, b) => b.ts - a.ts);
-    items.slice(10).forEach((x) => localStorage.removeItem(x.key));
-  } catch {
-    // non-fatal
-  }
+function persistToStorage() {
 }
 
 function updateUrlFromState() {
+  if (!document.getElementById("tabVisualizer").classList.contains("active")) return;
   const params = new URLSearchParams();
+  params.set("tab", "visualizer");
   const sheetIndices = Array.from(state.selectedSheets)
     .map((sheet) => allSheets.indexOf(sheet))
     .filter((x) => x >= 0)
@@ -339,10 +323,10 @@ function updateUrlFromState() {
     .sort((a, b) => a - b)
     .slice(0, 80);
 
-  params.set("s", sheetIndices.join(","));
-  params.set("c", countryIndices.join(","));
-  params.set("r", state.activeRange);
-  params.set("a", state.axisMode);
+  params.set("vs", sheetIndices.join(","));
+  params.set("vc", countryIndices.join(","));
+  params.set("vr", state.activeRange);
+  params.set("va", state.axisMode);
 
   let hiddenTokens = state.hiddenSeriesOrder
     .filter((key) => state.hiddenSeries.has(key))
@@ -356,14 +340,14 @@ function updateUrlFromState() {
     .filter(Boolean)
     .slice(0, 500);
 
-  params.set("h", hiddenTokens.join("."));
+  params.set("vh", hiddenTokens.join("."));
   params.delete("partial");
 
   let query = params.toString();
   let partial = false;
   while (query.length > URL_MAX && hiddenTokens.length > 0) {
     hiddenTokens.pop();
-    params.set("h", hiddenTokens.join("."));
+    params.set("vh", hiddenTokens.join("."));
     partial = true;
     query = params.toString();
   }
@@ -395,15 +379,29 @@ function scheduleUrlSync() {
   urlDebounce = setTimeout(updateUrlFromState, 300);
 }
 
-function buildSelectOptions(selectEl, values, selectedSet) {
-  selectEl.innerHTML = "";
+/* Checkbox list builder (replaces ctrl-click multi-selects). */
+function buildCheckList(container, values, selectedSet, onToggle) {
+  container.innerHTML = "";
   values.forEach((value) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    option.selected = selectedSet.has(value);
-    selectEl.appendChild(option);
+    const label = document.createElement("label");
+    label.className = "checkItem";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = value;
+    cb.checked = selectedSet.has(value);
+    cb.addEventListener("change", () => onToggle(value, cb.checked));
+    const span = document.createElement("span");
+    span.textContent = value;
+    label.appendChild(cb);
+    label.appendChild(span);
+    container.appendChild(label);
   });
+  if (!values.length) {
+    const d = document.createElement("div");
+    d.className = "checkEmpty";
+    d.textContent = "No matches";
+    container.appendChild(d);
+  }
 }
 
 function getFilteredSheets() {
@@ -501,14 +499,8 @@ function applySelection(sheet, country) {
   syncUIAndRender();
 }
 
-function getRangeStartMs(maxMs, range) {
-  if (range === "all" || !maxMs) return null;
-  const years = { "10y": 10, "5y": 5, "3y": 3, "1y": 1 }[range];
-  if (!years) return null;
-  const d = new Date(maxMs);
-  d.setFullYear(d.getFullYear() - years);
-  return d.getTime();
-}
+// getRangeStartMs is shared via T2Core.
+const getRangeStartMs = C.getRangeStartMs;
 
 function computeSeriesForRender() {
   const snapshotSheets = Array.from(state.selectedSheets);
@@ -521,7 +513,7 @@ function computeSeriesForRender() {
   snapshotSheets.forEach((sheet) => {
     snapshotCountries.forEach((country) => {
       const key = getSeriesKey(sheet, country);
-      const raw = seriesCache.get(key) || [];
+      const raw = indexes.seriesCache.get(key) || [];
       const filtered = raw.filter((p) => (startMs ? p.ms >= startMs : true));
 
       if (filtered.length === 0) {
@@ -556,6 +548,52 @@ function computeSeriesForRender() {
         values = values.map((v) => (v - mean) / std);
       }
 
+      if (state.axisMode === "zscore_expanding") {
+        // Compute expanding z-scores from the range-filtered series so the
+        // Welford accumulator resets at the range boundary. Without this,
+        // a "1Y" range would show z-scores computed against the full 20-year
+        // history, violating user expectation of "Z vs Own History."
+        const rangeRaw = startMs ? raw.filter((p) => p.ms >= startMs) : raw;
+        if (rangeRaw.length < 2) {
+          managerRows.push({ key, label: `${country} - ${sheet}`, color: hslColor(key), status: "Not normalizable", visible: false });
+          return;
+        }
+        const expandingZ = buildExpandingZScoreSeries(rangeRaw);
+        const zMap = new Map(rangeRaw.map((p, idx) => [p.date, expandingZ[idx]]));
+        values = filtered.map((p) => zMap.get(p.date));
+      }
+
+      if (state.axisMode === "cross_sectional") {
+        values = filtered.map((p) => percentileVsCrossCountry(sheet, country, p.date, p.value));
+        const validPairs = filtered.map((p, idx) => ({ p, v: values[idx] })).filter((item) => item.v !== null && item.v !== undefined && Number.isFinite(item.v));
+        if (validPairs.length === 0) {
+          managerRows.push({ key, label: `${country} - ${sheet}`, color: hslColor(key), status: "Not normalizable", visible: false });
+          return;
+        }
+        const mappedFiltered = validPairs.map((x) => x.p);
+        const mappedValues = validPairs.map((x) => x.v);
+
+        const data = mappedFiltered.map((p, i) => ({ x: p.ms, y: mappedValues[i] }));
+        const hidden = state.hiddenSeries.has(key);
+        managerRows.push({ key, label: `${country} - ${sheet}`, color: hslColor(key), status: "", visible: !hidden });
+
+        if (!hidden) {
+          datasets.push({
+            key,
+            label: `${country} - ${sheet}`,
+            data,
+            borderColor: hslColor(key),
+            pointRadius: 0,
+            pointHoverRadius: 3,
+            borderWidth: 2,
+            tension: 0.1,
+            fill: false,
+          });
+          totalVisiblePoints += data.length;
+        }
+        return;
+      }
+
       const data = filtered.map((p, i) => ({ x: p.ms, y: values[i] }));
       const hidden = state.hiddenSeries.has(key);
       managerRows.push({ key, label: `${country} - ${sheet}`, color: hslColor(key), status: "", visible: !hidden });
@@ -582,9 +620,9 @@ function computeSeriesForRender() {
 
 function enforceGuardrails(visibleSeriesCount, totalVisiblePoints) {
   const warn =
-    (visibleSeriesCount > 50 && visibleSeriesCount <= 80) ||
-    (totalVisiblePoints > 100000 && totalVisiblePoints <= 200000);
-  const block = visibleSeriesCount > 80 || totalVisiblePoints > 200000;
+    (visibleSeriesCount > C.GUARDRAIL_WARN_SERIES && visibleSeriesCount <= C.GUARDRAIL_BLOCK_SERIES) ||
+    (totalVisiblePoints > C.GUARDRAIL_WARN_POINTS && totalVisiblePoints <= C.GUARDRAIL_BLOCK_POINTS);
+  const block = visibleSeriesCount > C.GUARDRAIL_BLOCK_SERIES || totalVisiblePoints > C.GUARDRAIL_BLOCK_POINTS;
 
   if (block) {
     setBanner("Selection too large to render. Narrow sheets/countries or date range.", true);
@@ -612,6 +650,11 @@ function updateSummary(info) {
 }
 
 function renderSeriesManager(rows) {
+  // Remember which series' checkbox held focus before we rebuild, so toggling
+  // a series doesn't strand focus on <body>. (Previously the change handler
+  // called syncUIAndRender -> renderSeriesManager -> innerHTML="", which
+  // destroyed the checkbox the user just clicked.)
+  const prevActiveKey = (document.activeElement && document.activeElement.dataset?.seriesKey) || null;
   dom.seriesManager.innerHTML = "";
   rows.forEach((row) => {
     const wrap = document.createElement("div");
@@ -632,6 +675,8 @@ function renderSeriesManager(rows) {
     toggle.type = "checkbox";
     toggle.checked = row.visible;
     toggle.disabled = Boolean(row.status);
+    toggle.dataset.seriesKey = row.key;
+    toggle.setAttribute("aria-label", `Toggle visibility for ${row.label}`);
     toggle.addEventListener("change", () => {
       if (toggle.checked) {
         state.hiddenSeries.delete(row.key);
@@ -647,6 +692,9 @@ function renderSeriesManager(rows) {
     wrap.appendChild(status);
     wrap.appendChild(toggle);
     dom.seriesManager.appendChild(wrap);
+
+    // Restore focus to the equivalent checkbox after the rebuild.
+    if (prevActiveKey && prevActiveKey === row.key) toggle.focus();
   });
 }
 
@@ -758,6 +806,10 @@ function renderChart() {
   c.data.datasets = computed.datasets;
   c.update();
 
+  // Dismiss the chart loading skeleton once we have data rendered.
+  const sk = document.querySelector('.chartSkeleton[data-for="vizSeriesChart"]');
+  if (sk) sk.classList.add("is-loaded");
+
   if (state.axisMode === "raw") {
     const ratio = getScaleRatio(computed.datasets);
     if (ratio >= 50) {
@@ -769,16 +821,37 @@ function renderChart() {
 }
 
 function updateRangeAxisButtons() {
-  dom.rangeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.range === state.activeRange));
-  dom.axisButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.axis === state.axisMode));
+  dom.rangeButtons.forEach((btn) => {
+    const isActive = btn.dataset.range === state.activeRange;
+    btn.classList.toggle("active", isActive);
+    btn.setAttribute("aria-pressed", String(isActive));
+  });
+  dom.axisButtons.forEach((btn) => {
+    const isActive = btn.dataset.axis === state.axisMode;
+    btn.classList.toggle("active", isActive);
+    btn.setAttribute("aria-pressed", String(isActive));
+  });
+}
+
+function onSheetToggle(sheet, checked) {
+  addUndoSnapshot();
+  if (checked) state.selectedSheets.add(sheet);
+  else state.selectedSheets.delete(sheet);
+  cascadeAndPrune(true);
+  syncUIAndRender();
+}
+
+function onCountryToggle(country, checked) {
+  addUndoSnapshot();
+  if (checked) state.selectedCountries.add(country);
+  else state.selectedCountries.delete(country);
+  cascadeAndPrune(false);
+  syncUIAndRender();
 }
 
 function syncSelects() {
-  const filteredSheets = getFilteredSheets();
-  buildSelectOptions(dom.sheetSelect, filteredSheets, state.selectedSheets);
-
-  const filteredCountries = getFilteredCountries();
-  buildSelectOptions(dom.countrySelect, filteredCountries, state.selectedCountries);
+  buildCheckList(dom.sheetList, getFilteredSheets(), state.selectedSheets, onSheetToggle);
+  buildCheckList(dom.countryList, getFilteredCountries(), state.selectedCountries, onCountryToggle);
 }
 
 function syncUIAndRender() {
@@ -787,24 +860,7 @@ function syncUIAndRender() {
   renderChart();
 }
 
-function onSheetSelectionChange() {
-  addUndoSnapshot();
-  state.selectedSheets = new Set(Array.from(dom.sheetSelect.selectedOptions).map((o) => o.value));
-  cascadeAndPrune(true);
-  syncUIAndRender();
-}
-
-function onCountrySelectionChange() {
-  addUndoSnapshot();
-  state.selectedCountries = new Set(Array.from(dom.countrySelect.selectedOptions).map((o) => o.value));
-  cascadeAndPrune(false);
-  syncUIAndRender();
-}
-
 function attachEvents() {
-  dom.sheetSelect.addEventListener("change", onSheetSelectionChange);
-  dom.countrySelect.addEventListener("change", onCountrySelectionChange);
-
   dom.sheetFilter.addEventListener("input", () => {
     sheetFilterTerm = normalizeToken(dom.sheetFilter.value);
     syncSelects();
@@ -910,37 +966,9 @@ function attachEvents() {
   });
 }
 
-async function loadWorkbook() {
-  setBanner("Loading dataset...");
-  const resp = await fetch(DATA_PATH);
-  if (!resp.ok) throw new Error(`Failed to load data (${resp.status})`);
-  const parsed = await resp.json();
-
-  if (!parsed || typeof parsed.sheets !== "object") {
-    throw new Error("Malformed dataset: missing sheets");
-  }
-
-  const cleanedSheets = {};
-  const skipped = [];
-  Object.entries(parsed.sheets).forEach(([name, sheet]) => {
-    if (!sheet || !Array.isArray(sheet.countries) || !Array.isArray(sheet.rows)) {
-      skipped.push(name);
-      return;
-    }
-    cleanedSheets[name] = sheet;
-  });
-
-  workbook = { ...parsed, sheets: cleanedSheets };
-  if (skipped.length > 0) {
-    setBanner(`Skipped malformed sheets: ${skipped.join(", ")}`, true);
-  } else {
-    setBanner("");
-  }
-}
-
 async function init() {
   try {
-    await loadWorkbook();
+    workbook = await window.__t2DataPromise;
     buildIndexes();
 
     const fromUrl = hydrateFromUrl();
@@ -970,4 +998,14 @@ window.addEventListener("beforeunload", () => {
   if (chart) chart.destroy();
 });
 
+window.addEventListener("tab-switch", (e) => {
+  if (e.detail === "visualizer") {
+    if (workbook) {
+      syncUIAndRender();
+      updateUrlFromState();
+    }
+  }
+});
+
 init();
+})();

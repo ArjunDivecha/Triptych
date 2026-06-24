@@ -1,161 +1,91 @@
 # Triptych
 
-Repository for **Triptych**: a local-first web application that turns multi-sheet Excel workbooks into interactive time-series analysis interfaces.
+**Triptych** is a local-first factor-timing dashboard for cross-country equity analysis. It turns the multi-sheet `T2 Master.xlsx` workbook (58 factor sheets × 34 markets × monthly since 2000) into an interactive web app, packaged as a clickable macOS application with automatic data refresh.
 
-The app is built for comparing many variables (factors) across many countries/markets over time, with fast filtering, transformations, and shareable state.
+## What it does
 
-## What This Repository Does
-This repo provides an end-to-end workflow:
+Two views in one app:
 
-1. Read a structured Excel workbook (`T2 Master.xlsx` style data).
-2. Convert the workbook into a frontend-friendly JSON dataset.
-3. Serve static web UIs that support multi-selection and charting.
-4. Persist chart configuration in URL parameters for reproducible views.
+1. **Triptych Deep-Dive** — the core workflow. For one factor and one market:
+   - **Top panel**: the factor signal (raw, expanding z-score vs own history, or cross-sectional z vs peers)
+   - **Middle panel**: cumulative return (absolute, or relative to the all-country average), rebased at the start of the selected window; x-axis aligned with the top panel, with a synchronized crosshair
+   - **Bottom panel**: average N-month forward return by signal bucket (deciles/quintiles/terciles), current bucket highlighted
+   - **Cross-Market Snapshot**: every market's *current* bucket for the selected factor vs its own history
+   - **Bucket statistics table**: observations, average/median forward return, hit rate, best/worst, overlap-adjusted t-stats, top-minus-bottom spread
+   - **Bucket × Horizon matrix**: average forward return heatmap across 1/3/6/12/24/36-month horizons, with the Spearman IC per horizon
+   - **Headline stat cards**: latest signal, current bucket, bucket average forward return, hit rate, IC
+   - **Exports**: tables → xlsx, charts → PDF
 
-In short: it is a lightweight analytics product for cross-country factor visualization.
+2. **Factor Visualizer** — a multi-series charting workbench: any combination of sheets and markets, five axis modes, command-style queries ("India Trailing PE"), per-series visibility manager, undo, shareable URLs.
 
-## Primary Use Case
-Use this project when you need to answer questions like:
-- How did `Trailing PE` evolve for `India` vs `U.S.`?
-- How do several valuation and macro factors co-move through time?
-- What changed in the last `1Y`, `3Y`, `5Y`, or full history?
-- Which series are comparable only after normalization (`Indexed` or `Z-Score`)?
+### Methodology notes
+- Bucket thresholds come in two modes: **Full-sample** (descriptive; uses the entire history, so it has look-ahead) and **Point-in-time** (expanding thresholds with a 36-month warm-up; an honest backtest).
+- t-stats and the IC t-stat use an effective sample size of n / horizon to adjust for overlapping forward returns.
+- Forward returns use nearest-date matching (±15 days) so month-start vs month-end grids both work.
 
-## Key Features
-- Multi-select sheets (variables) and countries.
-- Command-style query input such as `India Trailing P/E`.
-- Fuzzy suggestions when exact parsing is ambiguous.
-- Date windows: `All`, `10Y`, `5Y`, `3Y`, `1Y`.
-- Axis modes:
-  - `Raw` values.
-  - `Indexed` values (rebase to 100).
-  - `Z-Score` normalized values.
-- Series manager with per-series visibility toggle.
-- Undo stack for selection operations.
-- Selection/canvas state encoded into URL.
-- Render guardrails to avoid freezing browser on huge combinations.
+## Repository layout
 
-## Repository Layout
 ```text
 .
-├── README.md                      # Repository-level guide (this file)
+├── README.md                      # This file
+├── Triptych.app/                  # macOS launcher bundle (gitignored; rebuild with gen_icon.py + the files below)
 └── app/
-    ├── index.html                 # App shell
-    ├── triptych.html              # Triptych shell
+    ├── triptych.html              # App shell (both tabs)
+    ├── index.html                 # Redirect to triptych.html
     ├── README.md                  # App-level usage documentation
-    ├── docs/
-    │   └── PROGRAM.md             # Technical architecture and behavior
+    ├── docs/PROGRAM.md            # Technical architecture reference
     ├── assets/
-    │   ├── app.js                 # Frontend state, parsing, rendering logic
-    │   ├── triptych.js            # Triptych logic and calculations
-    │   ├── styles.css             # UI styling
-    │   └── triptych.css           # Triptych styling
+    │   ├── triptych.js            # Deep-Dive tab logic (analytics, charts, refresh, exports)
+    │   ├── app.js                 # Visualizer tab logic
+    │   ├── triptych.css           # Light-mode stylesheet (both tabs)
+    │   ├── styles.css             # (legacy, unused by triptych.html)
+    │   ├── favicon.svg            # Browser tab icon
+    │   ├── icon-1024.png          # Master app icon image
+    │   └── vendor/                # Chart.js, SheetJS, jsPDF (offline, no CDN)
     ├── scripts/
-    │   └── extract_t2_master.py   # Excel -> JSON extractor
+    │   ├── extract_t2_master.py   # Excel → columnar JSON (format v2)
+    │   ├── serve_triptych.py      # Local server + /api/status + /api/refresh
+    │   └── gen_icon.py            # Regenerates the .icns app icon
     └── data/
-        └── t2_master.json         # Generated dataset consumed by frontend
+        ├── t2_master.json         # Generated dataset (compact columnar JSON)
+        └── backups/               # Timestamped gzipped backups (auto, keeps 10)
 ```
 
-## How the System Works
-### 1) Data extraction
-`app/scripts/extract_t2_master.py` reads Excel in `read_only` mode and exports a JSON object keyed by sheet name.
+## How to launch
 
-Each sheet output includes:
-- `countries`: list of country/market columns.
-- `rows`: date-indexed objects containing numeric values by country.
+**Double-click `Triptych.app`** (at the repo root). It:
+1. Starts the local server (`serve_triptych.py --port 8123 --auto-refresh`) if not already running
+2. If the source workbook is newer than the dataset, re-extracts it in the background (the UI shows "Refreshing dataset…" and reloads when done)
+3. Opens the UI in a chromeless Google Chrome app window
 
-### 2) Frontend indexing
-At app startup (`app/assets/app.js`):
-- JSON is loaded and validated.
-- in-memory indices are built:
-  - all sheets.
-  - all countries.
-  - sheet -> country availability.
-  - precomputed point arrays per `(sheet, country)`.
+Server logs go to `~/Library/Logs/Triptych.log`.
 
-### 3) State-driven rendering
-User actions update a central state model:
-- selected sheets.
-- selected countries.
-- hidden series.
-- date range.
-- axis mode.
+### Manual launch (terminal)
 
-The renderer derives datasets from state and updates Chart.js.
-
-### 4) URL synchronization
-Selections are serialized to query parameters (`s`, `c`, `r`, `a`, `h`) so a URL can reconstruct the same view.
-
-## Data Expectations
-The extractor and frontend assume this workbook pattern:
-- Row 1: headers (`Country`, then country/market names).
-- Column A: date values.
-- Remaining cells: numeric data points or blanks.
-
-If source format changes significantly, update extractor logic first.
-
-## Quick Start
-From repository root:
-
-1. Regenerate JSON from Excel
 ```bash
-python3 app/scripts/extract_t2_master.py \
-  --input "/Users/arjundivecha/Dropbox/AAA Backup/A Complete/T2 Factor Timing Fuzzy/T2 Master.xlsx" \
-  --output "app/data/t2_master.json"
+cd "/Users/arjundivecha/Dropbox/AAA Backup/A Working/Triptych/app/scripts"
+python3 serve_triptych.py --auto-refresh
+# open http://127.0.0.1:8123/triptych.html
 ```
 
-2. Start local server
-```bash
-cd app
-python3 -m http.server 8000
-```
+## Data pipeline
 
-3. Open app
-- [http://127.0.0.1:8000](http://127.0.0.1:8000)
+- **Source workbook**: `/Users/arjundivecha/Dropbox/AAA Backup/A Complete/T2 Factor Timing Fuzzy/T2 Master.xlsx`
+  (row 1 = country headers, column A = dates, one sheet per factor)
+- **Extractor**: `app/scripts/extract_t2_master.py` → `app/data/t2_master.json` (columnar format v2, ~6 MB; ~1.6 s)
+- **Refresh paths** (all run the same extract):
+  1. Auto on launch — `--auto-refresh` compares the workbook mtime to the dataset's recorded `source_mtime`
+  2. The **Refresh Data** button in the UI header (POST `/api/refresh`)
+  3. Manually: `python3 app/scripts/extract_t2_master.py`
+- Every refresh first writes a gzipped, timestamped backup of the previous JSON to `app/data/backups/` (10 most recent kept) and replaces the dataset atomically.
+- The header chip shows the data vintage ("Data through … · extracted …") and warns when the source workbook is newer.
 
-## Typical Workflow
-1. Select one or more sheets (variables).
-2. Select one or more countries.
-3. Use range buttons for horizon control.
-4. Use axis mode to normalize if scales are very different.
-5. Hide noisy series in Series Manager.
-6. Share URL when view is finalized.
+## Requirements
 
-## Guardrails and Practical Limits
-To protect browser performance, the UI enforces render limits and warnings:
-- warns before very large renders.
-- blocks oversized combinations.
-- trims URL state when necessary and marks link as partial.
+- macOS with Google Chrome (falls back to the default browser with a notice)
+- python3 with `openpyxl` (the launcher checks homebrew, /usr/local, and system python and fails loudly if none has it)
+- No other dependencies; all JS libraries are vendored locally and the app works offline
 
-This prevents accidental “too many lines x too many points” crashes.
+## Related repositories
 
-## Known Limitations
-- Static JSON can become large as dataset grows.
-- No backend, user auth, or server-side query layer.
-- No built-in export module (PNG/CSV) yet.
-- Automated test suite is not yet implemented.
-
-## Triptych App
-`Triptych` is a 3-panel app at [`app/triptych.html`](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/triptych.html):
-- Top panel: one variable (raw or normalized)
-- Middle panel: cumulative return of selected country (absolute or relative vs all-country average)
-- Bottom panel: `N`-month forward return by signal decile (all deciles)
-
-Run it with the same static server and open:
-- `http://127.0.0.1:8000/triptych.html`
-
-## Developer Notes
-- Frontend is vanilla JS for minimal dependencies.
-- Charting is done with Chart.js via CDN.
-- State logic lives in one file (`app/assets/app.js`) and is heavily behavior-driven.
-- Data refresh means re-running extractor and reloading browser.
-
-## Recommended Next Enhancements
-1. Add tests for parser, URL state round-tripping, and cascade pruning.
-2. Add data export features (CSV and chart image).
-3. Add downsampling strategy for dense series.
-4. Add static deployment profile (Vercel/Cloudflare Pages).
-
-## Documentation Map
-- App guide: [app/README.md](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/README.md)
-- Technical reference: [app/docs/PROGRAM.md](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/docs/PROGRAM.md)
+- **Asado** (`/Users/arjundivecha/Dropbox/AAA Backup/A Working/Asado`) — the data platform whose monthly/daily pipelines update T2 workbooks. Its refresh architecture (status endpoint, timestamped backups, stdlib HTTP server) is the model for Triptych's updater.

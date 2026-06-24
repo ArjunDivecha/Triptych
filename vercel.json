@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "public": false,
+  "buildCommand": null,
+  "outputDirectory": "app",
+  "rewrites": [
+    { "source": "/api/status", "destination": "/api/status.json" },
+    { "source": "/api/refresh", "destination": "/api/refresh.json" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    },
+    {
+      "source": "/data/t2_master.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" },
+        { "key": "Content-Type", "value": "application/json" }
+      ]
+    }
+  ]
+}

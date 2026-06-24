@@ -1,0 +1,24 @@
+{
+  "name": "triptych",
+  "version": "1.0.0",
+  "description": "**Triptych** is a local-first factor-timing dashboard for cross-country equity analysis. It turns the multi-sheet `T2 Master.xlsx` workbook (58 factor sheets × 34 markets × monthly since 2000) into an interactive web app, packaged as a clickable macOS application with automatic data refresh.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ArjunDivecha/Triptych.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ArjunDivecha/Triptych/issues"
+  },
+  "homepage": "https://github.com/ArjunDivecha/Triptych#readme",
+  "dependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}

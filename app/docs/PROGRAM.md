@@ -1,213 +1,131 @@
 # Program Documentation
 
-This document provides a full technical reference for `T2 Factor Visualizer`.
+Full technical reference for the Triptych app (Deep-Dive + Factor Visualizer).
 
 ## 1. System Architecture
 
 ### 1.1 Components
-1. Extractor (`scripts/extract_t2_master.py`)
-2. Static frontend (`index.html`, `assets/app.js`, `assets/styles.css`)
-3. Data file (`data/t2_master.json`)
+1. Extractor — `app/scripts/extract_t2_master.py` (Excel → columnar JSON v2)
+2. Server — `app/scripts/serve_triptych.py` (static files + status/refresh API)
+3. Frontend — `app/triptych.html`, `app/assets/triptych.js` (Deep-Dive), `app/assets/app.js` (Visualizer), `app/assets/triptych.css` (light theme)
+4. Data — `app/data/t2_master.json` (+ `app/data/backups/`)
+5. macOS launcher — `Triptych.app/Contents/MacOS/Triptych` (repo root)
+6. Vendored libraries — `app/assets/vendor/` (Chart.js 4.4.1, SheetJS 0.20.3, jsPDF 2.5.2); no CDN, works offline
 
-### 1.2 Runtime Flow
-1. Browser requests `index.html`
-2. Frontend loads `t2_master.json`
-3. App validates data structure and builds indexes
-4. UI events mutate app state
-5. Derived state builds chart datasets
-6. Chart.js renders canvas
-7. State syncs to URL and local storage
+### 1.2 Runtime flow
+1. `Triptych.app` starts `serve_triptych.py --port 8123 --auto-refresh` (if not running) and opens Chrome with `--app=http://127.0.0.1:8123/triptych.html`
+2. On startup the server compares the source workbook mtime with the dataset's recorded `source_mtime`; if stale it re-extracts in a background thread
+3. The browser loads the dataset once (shared `window.__t2DataPromise` between both tabs), builds indexes, renders
+4. The UI polls `/api/status` while a refresh runs and reloads when `dataset_generated_at` changes
 
-## 2. Extractor Script
+## 2. Data Format (v2, columnar)
 
-File: `/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/scripts/extract_t2_master.py`
-
-### 2.1 Purpose
-Convert Excel workbook to normalized JSON that is chart-ready.
-
-### 2.2 CLI
-```bash
-python3 app/scripts/extract_t2_master.py --input <path.xlsx> --output <path.json>
-```
-
-### 2.3 Data Handling
-- Reads workbook in read-only mode
-- Uses first row as country headers
-- Uses column A as date field
-- Stores numeric values only (non-numeric -> `null`)
-- Skips empty rows/sheets where appropriate
-
-## 3. Frontend State Model
-
-File: `/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/assets/app.js`
-
-### 3.1 Core State
-- `selectedSheets: Set<string>`
-- `selectedCountries: Set<string>`
-- `hiddenSeries: Set<string>`
-- `hiddenSeriesOrder: string[]`
-- `activeRange: 'all' | '10y' | '5y' | '3y' | '1y'`
-- `axisMode: 'raw' | 'indexed' | 'zscore'`
-- `undoStack: snapshot[]`
-- `isSharePartial: boolean`
-
-### 3.2 Snapshot/Undo
-Each destructive or structural selection action pushes a snapshot.
-Undo restores entire snapshot (selections, hidden state, range, axis).
-Stack depth: 3.
-
-## 4. Indexes and Caches
-
-### 4.1 Built at init
-- `allSheets[]`
-- `allCountries[]`
-- `sheetToCountries: Map<sheet, Set<country>>`
-- `seriesCache: Map<'sheet|||country', Point[]>`
-
-### 4.2 Point Structure
-```ts
+```json
 {
-  date: string;   // YYYY-MM-DD
-  ms: number;     // unix epoch ms
-  value: number;
+  "format": 2,
+  "generated_at": "2026-06-10T18:47:25+00:00",
+  "source_file": "/Users/arjundivecha/Dropbox/AAA Backup/A Complete/T2 Factor Timing Fuzzy/T2 Master.xlsx",
+  "source_mtime": "2026-06-10T07:38:56+00:00",
+  "sheets": {
+    "Trailing PE": {
+      "countries": ["India", "..."],
+      "dates": ["2000-02-01", "..."],
+      "values": { "India": [21.3, null, "..."] }
+    }
+  }
 }
 ```
 
-## 5. Selection and Cascade Logic
+- Compact (no indentation), written atomically (`.tmp` + `os.replace`)
+- ~6 MB vs 21 MB for the old row-oriented v1; the frontend **requires** `format: 2` and throws otherwise (no silent fallback)
+- `null` marks missing values; dates are `YYYY-MM-DD` strings
 
-### 5.1 Valid Country Union
-Valid countries are computed as union across selected sheets.
+## 3. Server API (`serve_triptych.py`, stdlib only)
 
-### 5.2 Pruning Rules
-On sheet changes:
-- countries not in union are removed
-- hidden series referencing invalid sheet/country are removed
-- app notifies user via banner when pruning occurs
+| Endpoint | Method | Behavior |
+|---|---|---|
+| `/...` | GET | static files from `app/`; gzip for json/js/css/html/svg when accepted; `Cache-Control: no-store` on the dataset |
+| `/api/status` | GET | `{dataset_generated_at, dataset_source_mtime, source_file, source_exists, source_mtime, stale, refresh_running, last_refresh_result, last_refresh_error, last_refresh_finished}` |
+| `/api/refresh` | POST | 202 + background refresh; 409 if one is already running |
 
-## 6. Command Search Behavior
+Refresh sequence: gzip-backup current JSON to `data/backups/t2_master_<stamp>.json.gz` (keep 10) → `extract_workbook()` → atomic replace. Errors are caught, recorded in `last_refresh_error`, and surfaced in the UI banner — never masked.
 
-### 6.1 Normalization
-- lowercase
-- punctuation/extra spaces normalized
-- alias replacements:
-  - `training -> trailing`
-  - `p/e -> pe`
+## 4. Deep-Dive Analytics (`triptych.js`)
 
-### 6.2 Matching
-1. Try exact/substring score-based pair selection
-2. If no direct match, compute fuzzy score
-3. Show top 3 fuzzy suggestions; user chooses one
+### 4.1 Signal modes
+- `raw` — native values
+- `history_z` — expanding z-score vs own history (Welford; no look-ahead; 0 during the first observation)
+- `cross_var_pct` — z-score vs all *other* countries' values at the same date
 
-### 6.3 Debounce
-Command parsing on input: `180ms`.
+### 4.2 Forward returns
+- Return source: the `Tot Return Index` sheet (alias/heuristic match)
+- Forward return at t over horizon h months: nearest return-index point to t (±15-day tolerance, binary search) vs nearest point to t+h
+- Relative mode subtracts the equal-weighted average forward return across all countries with data at t
 
-## 7. Transform and Rendering Pipeline
+### 4.3 Bucketing
+- `full` (full-sample): thresholds are quantiles of all signals in the sample — descriptive, has look-ahead
+- `pit` (point-in-time): for each observation, thresholds use only signals up to and including that date; requires a 36-observation warm-up (`PIT_MIN_OBS`)
+- Bucket counts: 10/5/3; the "current bucket" always uses full-history thresholds (which is point-in-time for *today*)
 
-### 7.1 Modes
-- `raw`: unchanged values
-- `indexed`: divide by first non-zero visible value, * 100
-- `zscore`: `(x - mean) / std` over visible window
+### 4.4 Statistics
+- Per bucket: count, mean, median, hit rate, best, worst, t-stat = mean / (sd/√n_eff) with n_eff = n / horizon (overlap adjustment)
+- IC: Spearman rank correlation of signal vs forward return over the in-range sample; t = IC·√((n_eff−2)/(1−IC²))
+- Spread: top-bucket mean − bottom-bucket mean
+- Horizon matrix: the above recomputed for each of 1/3/6/12/24/36 months
 
-### 7.2 Invalid Series Conditions
-- `No data`: no points after filters
-- `Not indexable`: no usable anchor in indexed mode
-- `Not normalizable`: insufficient variation for zscore
+### 4.5 Charts
+- Top + middle share an x-domain (min and max) and a synchronized crosshair (custom Chart.js plugin registered on both)
+- Middle panel rebases at the start of the selected window (absolute: first in-window level; relative: wealth ratios accrued in-window only)
+- Snapshot: horizontal bars of each market's current bucket vs its own history; selected market highlighted
+- σ tick format for normalized signals; % for returns
 
-### 7.3 Time Range
-Range buttons compute a start date from dataset max date:
-- `10y`, `5y`, `3y`, `1y`, `all`
+## 5. State and Persistence
 
-### 7.4 Chart Setup
-- Chart.js line chart
-- x-axis: linear (timestamp ms)
-- tooltip title converts x -> `YYYY-MM-DD`
-- native legend disabled; custom manager used
+- Deep-Dive URL params: `tab=triptych`, `tf` (factor), `tc` (country), `tn` (normalization), `tm` (return mode), `th` (horizon), `tr` (range), `td` (bucket mode), `tb` (bucket count); localStorage key `triptych:last`
+- Visualizer URL params: `tab=visualizer`, `vs`, `vc`, `vr`, `va`, `vh`, `partial`; localStorage keys `t2viz:*`
+- The two namespaces never collide (this fixed a bug where both tabs fought over `c` and `h`)
+- Hydration order: defaults → localStorage → URL (URL wins)
 
-## 8. Performance Guardrails
+## 6. Exports
 
-Render checks run before draw:
-- warning zone (confirm dialog) for large selections
-- hard block beyond configured caps
+- **Tables → xlsx** (SheetJS): sheets "Bucket Stats" (incl. spread row), "Horizon Matrix" (incl. spread + IC rows), "Settings" (all control values + data vintage)
+- **Charts → PDF** (jsPDF, A4 landscape): page 1 title + top + middle, page 2 bucket bars, page 3 snapshot
+- Filenames: `Triptych <country> <factor> <date>.{xlsx,pdf}`
 
-This prevents accidental huge render combinations from freezing the browser.
+## 7. Visualizer (`app.js`)
 
-## 9. URL and Persistence
+Same engine as before with three changes: columnar v2 loader (shared fetch), namespaced URL params, and checkbox lists instead of ctrl-click multi-selects. Guardrails unchanged: warn >50 series or >100k points, block >80 series or >200k points.
 
-### 9.1 URL Encoding
-Short index-based serialization of selected entities.
+## 8. macOS App Bundle
 
-### 9.2 Validation
-- strict numeric parsing
-- bounds checking against available indices
-- capped list sizes
-
-### 9.3 Partial Share
-If URL would exceed target length:
-- hidden-series payload trimmed
-- `partial=1` set
-- sender sees warning
-
-### 9.4 Local Storage
-- last state cached
-- tab-scoped state stored with runtime tab id
-- old tab entries pruned
-
-## 10. Error Handling
-
-### 10.1 Data Load
-- fetch errors -> banner + empty-state message
-- malformed sheet blocks are skipped and listed
-
-### 10.2 Chart Library
-If Chart.js is unavailable, app shows explicit chart-load failure message.
-
-## 11. Accessibility Notes
-
-Current support includes:
-- labeled controls
-- keyboard-usable native inputs/selects/buttons
-- live summary/banner text areas
-
-Potential enhancements:
-- richer ARIA for dynamic series manager rows
-- keyboard shortcuts for power actions
-
-## 12. Security Notes
-
-Current safeguards:
-- user-facing strings use `textContent`
-- URL/local state validated before apply
-- strict number parsing for indices
-
-Recommended hardening for deployment:
-- add CSP headers
-- pin third-party script versions and integrity attributes
-
-## 13. Operational Procedures
-
-### 13.1 Update source data
-1. Regenerate JSON from workbook
-2. Restart server
-3. Hard refresh browser
-
-### 13.2 Rebuild from scratch
-```bash
-cd "/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit"
-python3 app/scripts/extract_t2_master.py \
-  --input "/Users/arjundivecha/Dropbox/AAA Backup/A Complete/T2 Factor Timing Fuzzy/T2 Master.xlsx" \
-  --output "app/data/t2_master.json"
-cd app
-python3 -m http.server 8000
+```text
+Triptych.app/Contents/
+├── Info.plist            # bundle id com.arjundivecha.triptych, LSUIElement
+├── MacOS/Triptych        # bash launcher
+└── Resources/Triptych.icns
 ```
 
-## 14. Known Limitations
-- Static JSON can become large and impact first-load time
-- Fuzzy parser may still require manual suggestion click for ambiguous phrases
-- No built-in export (PNG/CSV) yet
-- No automated test suite yet (manual validation currently used)
+Launcher: find a python3 with openpyxl (homebrew → /usr/local → system; loud dialog if none) → start server with `--auto-refresh` if `/api/status` is not answering → `open -na "Google Chrome" --args --app=<url>` (alert + default browser if Chrome missing). Logs: `~/Library/Logs/Triptych.log`. Icon regeneration: `python3 app/scripts/gen_icon.py` (PIL → sips → iconutil).
 
-## 15. Suggested Next Improvements
-1. Add automated tests for parser/state serialization
-2. Add export functions (chart image + filtered CSV)
-3. Add point downsampling for very large series
-4. Add deployment profile (Vercel/Cloudflare static hosting)
+## 9. Error Handling Policy
+
+FAIL IS FAIL: the frontend throws on non-v2 data; refresh errors surface verbatim in the banner and `/api/status`; the launcher shows critical dialogs instead of degrading silently. The only soft path is Chrome-missing → default browser, and it announces itself with an alert first.
+
+## 10. Operational Procedures
+
+### Update source data
+Any of: click **Refresh Data** in the UI; relaunch `Triptych.app` (auto-refresh); or run `python3 app/scripts/extract_t2_master.py`. Previous JSON is always backed up to `app/data/backups/` first.
+
+### Rebuild from scratch
+```bash
+cd "/Users/arjundivecha/Dropbox/AAA Backup/A Working/Triptych"
+python3 app/scripts/extract_t2_master.py
+python3 app/scripts/gen_icon.py        # only if the icon/icns is missing
+open Triptych.app
+```
+
+## 11. Known Limitations
+- No automated test suite (manual + Playwright verification)
+- PIT bucketing needs 36 months of history, so early-sample observations are excluded in that mode
+- The all-country benchmark is equal-weighted over whatever countries have data each month (composition drifts in the early sample)
+- Old v1 share links (`s`/`c`/`r`/`a`/`h` params) are not migrated

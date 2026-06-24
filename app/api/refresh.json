@@ -1,0 +1,1 @@
+{"error":"Refresh not available in cloud deployment. Run extract_t2_master.py locally then redeploy with: vercel --prod --yes"}

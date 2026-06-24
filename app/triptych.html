@@ -1,105 +1,416 @@
 <!DOCTYPE html>
+<!--
+=============================================================================
+FILE: triptych.html
+=============================================================================
+
+DESCRIPTION:
+App shell for Triptych, a local-first factor-timing dashboard. Two views:
+(1) Triptych Deep-Dive - factor signal, cumulative return, and forward-return
+    decile analysis for one market, plus a cross-market snapshot, decile
+    statistics table, and a decile-by-horizon matrix.
+(2) Factor Visualizer - multi-series charting workbench across sheets and
+    markets.
+All scripts and styles are local (no CDN) so the app works offline.
+
+INPUT FILES:
+- /Users/arjundivecha/Dropbox/AAA Backup/A Working/Triptych/app/data/t2_master.json
+  (fetched at runtime by assets/triptych.js and assets/app.js)
+- /api/status and /api/refresh endpoints served by scripts/serve_triptych.py
+
+OUTPUT FILES:
+- None written by this file. Export buttons generate downloads
+  (xlsx tables, PDF charts) in the browser.
+=============================================================================
+-->
 <html lang="en">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Triptych</title>
-  <link rel="stylesheet" href="./assets/triptych.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-  <script src="./assets/triptych.js" defer></script>
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg" />
+
+  <!-- CSS Stylesheets -->
+  <link rel="stylesheet" href="./assets/triptych.css?v=4" />
+
+  <!-- Vendored libraries (offline-capable) and app scripts.
+       core.js MUST load before triptych.js and app.js; it exposes the
+       shared window.T2Core module (dedup'd normalizeToken, buildIndexes,
+       stats, bucketing) consumed by both tab scripts. -->
+  <script src="./assets/vendor/chart.umd.min.js" defer></script>
+  <script src="./assets/vendor/xlsx.full.min.js" defer></script>
+  <script src="./assets/vendor/jspdf.umd.min.js" defer></script>
+  <script src="./assets/core.js?v=4" defer></script>
+  <script src="./assets/triptych.js?v=4" defer></script>
+  <script src="./assets/app.js?v=4" defer></script>
 </head>
 
 <body>
+  <!-- Global Warning/Info Banner -->
   <div id="banner" class="banner" aria-live="polite"></div>
 
   <main class="shell">
+    <!-- Header: title, data vintage, tab switcher -->
     <header class="hero">
-      <div>
+      <div class="hero-title">
         <h1>Triptych</h1>
-        <p class="sub">Factor exposure, return-to-factor signal, and decile run analysis.</p>
+        <p>Cross-market time-series analysis and factor decile testing</p>
       </div>
-      <a class="navLink" href="./index.html">Open T2 Visualizer</a>
+      <div class="hero-meta">
+        <span id="dataVintage" class="vintage-chip" title="Dataset vintage">Loading data…</span>
+        <button type="button" id="refreshBtn" class="ghost" title="Re-extract the dataset from T2 Master.xlsx">Refresh Data</button>
+      </div>
+      <nav class="tab-nav" aria-label="Dashboard views" role="tablist">
+        <button type="button" id="tabTriptych" class="tab-btn active" role="tab" aria-selected="true" aria-controls="triptych-view">Triptych Deep-Dive</button>
+        <button type="button" id="tabVisualizer" class="tab-btn" role="tab" aria-selected="false" aria-controls="visualizer-view">Factor Visualizer</button>
+      </nav>
     </header>
 
-    <section class="controls" aria-label="Triptych controls">
-      <div class="field">
-        <label for="factorSelect">Top Panel Factor</label>
-        <select id="factorSelect"></select>
-      </div>
+    <!-- TAB 1: TRIPTYCH VIEW -->
+    <div id="triptych-view" class="workspace-layout" role="tabpanel" aria-labelledby="tabTriptych">
+      <!-- Triptych Controls Sidebar -->
+      <aside class="sidebar">
+        <h3>Analysis Focus</h3>
 
-      <div class="field">
-        <label for="normalizationSelect">Top Panel Normalization</label>
-        <select id="normalizationSelect"></select>
-      </div>
+        <div class="field">
+          <label for="factorInput">Factor Variable</label>
+          <div class="combo">
+            <input type="text" id="factorInput" autocomplete="off" spellcheck="false" placeholder="Search factors…" />
+            <div id="factorList" class="comboList"></div>
+          </div>
+        </div>
 
-      <div class="field">
-        <label for="countrySelect">Country</label>
-        <select id="countrySelect"></select>
-      </div>
+        <div class="field">
+          <label for="countryInput">Country / Market</label>
+          <div class="combo">
+            <input type="text" id="countryInput" autocomplete="off" spellcheck="false" placeholder="Search markets…" />
+            <div id="countryList" class="comboList"></div>
+          </div>
+        </div>
 
-      <div class="field small">
-        <label for="returnModeSelect">Middle Return</label>
-        <select id="returnModeSelect"></select>
-      </div>
+        <div class="field">
+          <label for="normalizationSelect">Signal Normalization</label>
+          <select id="normalizationSelect"></select>
+        </div>
 
-      <div class="field small">
-        <label for="horizonSelect">Forward Horizon</label>
-        <select id="horizonSelect"></select>
-      </div>
+        <div class="field">
+          <label for="returnModeSelect">Cumulative Return</label>
+          <select id="returnModeSelect"></select>
+        </div>
 
-      <div class="ranges" role="group" aria-label="Date Range">
-        <button type="button" class="rangeBtn" data-range="all">All</button>
-        <button type="button" class="rangeBtn" data-range="10y">10Y</button>
-        <button type="button" class="rangeBtn" data-range="5y">5Y</button>
-        <button type="button" class="rangeBtn" data-range="3y">3Y</button>
-        <button type="button" class="rangeBtn" data-range="1y">1Y</button>
-      </div>
-    </section>
+        <div class="field">
+          <label for="horizonSelect">Forward Horizon</label>
+          <select id="horizonSelect"></select>
+        </div>
 
-    <section id="summary" class="summary" aria-live="polite"></section>
+        <div class="field">
+          <label for="decileModeSelect">Bucket Thresholds</label>
+          <select id="decileModeSelect" title="Full-sample: thresholds use the entire history (descriptive, has look-ahead). Point-in-time: each observation is bucketed using only data available at that date (honest backtest).
+"></select>
+        </div>
 
-    <section class="panel">
-      <div class="panelHead">
-        <h2 id="topTitle">Top Panel</h2>
-      </div>
-      <div class="canvasWrap"><canvas id="topChart"></canvas></div>
-    </section>
+        <div class="field">
+          <label for="bucketCountSelect">Buckets</label>
+          <select id="bucketCountSelect"></select>
+        </div>
 
-    <section class="panel">
-      <div class="panelHead">
-        <h2 id="midTitle">Middle Panel</h2>
-      </div>
-      <div class="canvasWrap"><canvas id="middleChart"></canvas></div>
-    </section>
+        <div class="field">
+          <label>History Window</label>
+          <div class="ranges" role="group" aria-label="Date Range Select">
+            <button type="button" class="rangeBtn tripRangeBtn" data-range="all">All</button>
+            <button type="button" class="rangeBtn tripRangeBtn" data-range="10y">10Y</button>
+            <button type="button" class="rangeBtn tripRangeBtn" data-range="5y">5Y</button>
+            <button type="button" class="rangeBtn tripRangeBtn" data-range="3y">3Y</button>
+            <button type="button" class="rangeBtn tripRangeBtn" data-range="1y">1Y</button>
+          </div>
+        </div>
 
-    <section class="panel">
-      <div class="panelHead">
-        <h2 id="bottomTitle">Bottom Panel</h2>
-      </div>
-      <div class="canvasWrap"><canvas id="bottomChart"></canvas></div>
-    </section>
+        <div class="field">
+          <label>Export</label>
+          <div class="export-actions">
+            <button type="button" id="exportXlsxBtn" class="ghost">Tables → xlsx</button>
+            <button type="button" id="exportPdfBtn" class="ghost">Charts → PDF</button>
+          </div>
+        </div>
+      </aside>
 
-    <section class="panel">
-      <div class="panelHead">
-        <h2>Decile Stats</h2>
-      </div>
-      <div class="tableWrap">
-        <table id="decileTable">
-          <thead>
-            <tr>
-              <th>Decile</th>
-              <th>Obs</th>
-              <th>Avg Fwd Return</th>
-              <th>Median</th>
-              <th>Hit Rate</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
+      <!-- Triptych Charts Stack -->
+      <section class="main-content" aria-label="Triptych charts stack">
+        <!-- Headline stat cards -->
+        <div id="statCards" class="statCards" aria-live="polite"></div>
+
+        <!-- Stats Summary Banner -->
+        <div id="tripSummary" class="summary" aria-live="polite"></div>
+
+        <!-- Top Panel: Factor Exposure -->
+        <div class="panel">
+          <div class="panelHead">
+            <h2 id="topTitle">Factor Exposure</h2>
+          </div>
+          <div class="canvasWrap">
+            <div class="chartSkeleton" data-for="topChart" aria-hidden="true"></div>
+            <canvas id="topChart" role="img" aria-label="Factor signal over time line chart. Summary available in the stat cards and decile statistics table below."></canvas>
+          </div>
+        </div>
+
+        <!-- Middle Panel: Cumulative Return -->
+        <div class="panel">
+          <div class="panelHead">
+            <h2 id="midTitle">Cumulative Return</h2>
+          </div>
+          <div class="canvasWrap">
+            <div class="chartSkeleton" data-for="middleChart" aria-hidden="true"></div>
+            <canvas id="middleChart" role="img" aria-label="Cumulative return over time line chart, synchronized with the factor signal chart above."></canvas>
+          </div>
+        </div>
+
+        <!-- Bottom Panel: Decile Forward Performance -->
+        <div class="panel">
+          <div class="panelHead">
+            <h2 id="bottomTitle">Forward Return by Decile</h2>
+          </div>
+          <div class="canvasWrap">
+            <div class="chartSkeleton" data-for="bottomChart" aria-hidden="true"></div>
+            <canvas id="bottomChart" role="img" aria-labelledby="bottomTitle decileTableTitle"></canvas>
+          </div>
+        </div>
+
+        <!-- Cross-Market Snapshot -->
+        <div class="panel">
+          <div class="panelHead">
+            <h2 id="snapshotTitle">Cross-Market Snapshot</h2>
+          </div>
+          <div class="canvasWrap snapshotWrap">
+            <div class="chartSkeleton" data-for="snapshotChart" aria-hidden="true"></div>
+            <canvas id="snapshotChart" role="img" aria-labelledby="snapshotTitle snapshotDataTableCaption"></canvas>
+          </div>
+          <!-- Visually-hidden data table so the snapshot has a non-visual
+               equivalent (the bar chart encodes ~34 markets' current buckets). -->
+          <table id="snapshotDataTable" class="visually-hidden" aria-hidden="false">
+            <caption id="snapshotDataTableCaption">Cross-market snapshot: each market's current bucket for the selected factor vs its own history.</caption>
+            <thead><tr><th>Market</th><th>Current Bucket</th><th>Signal</th><th>As of</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- Decile Stats Table -->
+        <div class="panel">
+          <div class="panelHead">
+            <h2 id="decileTableTitle">Decile Statistics</h2>
+          </div>
+          <div class="tableWrap">
+            <table id="decileTable">
+              <thead>
+                <tr>
+                  <th>Bucket</th>
+                  <th>Obs</th>
+                  <th>Avg Fwd Return</th>
+                  <th>Median</th>
+                  <th>Hit Rate</th>
+                  <th>Best</th>
+                  <th>Worst</th>
+                  <th>t-Stat*</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <p class="tableNote">*t-stats and the IC t-stat use an effective sample size of n / horizon to adjust for overlapping observations.</p>
+          </div>
+        </div>
+
+        <!-- Decile x Horizon Matrix -->
+        <div class="panel">
+          <div class="panelHead">
+            <h2 id="matrixTitle">Avg Forward Return: Bucket × Horizon</h2>
+          </div>
+          <div class="tableWrap">
+            <table id="horizonMatrix" aria-describedby="matrixLegend"></table>
+            <!-- Heatmap legend: explains the green/red shading bands so the
+                 matrix is not color-only (accessibility) and self-documenting. -->
+            <div id="matrixLegend" class="matrixLegend" aria-label="Heatmap legend">
+              <span class="matrixLegend-label">Less negative</span>
+              <span class="matrixLegend-swatches">
+                <span class="mx-neg-3 matrixLegend-swatch" title="&le; -15%"></span>
+                <span class="mx-neg-2 matrixLegend-swatch" title="-7% to -15%"></span>
+                <span class="mx-neg-1 matrixLegend-swatch" title="-2% to -7%"></span>
+                <span class="mx-flat matrixLegend-swatch" title="~0%"></span>
+                <span class="mx-pos-1 matrixLegend-swatch" title="2% to 7%"></span>
+                <span class="mx-pos-2 matrixLegend-swatch" title="7% to 15%"></span>
+                <span class="mx-pos-3 matrixLegend-swatch" title="&ge; 15%"></span>
+              </span>
+              <span class="matrixLegend-label">More positive</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- TAB 2: FACTOR VISUALIZER VIEW -->
+    <div id="visualizer-view" class="workspace-layout is-hidden" role="tabpanel" aria-labelledby="tabVisualizer" hidden>
+      <!-- Visualizer Multi-Select Sidebar -->
+      <aside class="sidebar">
+        <h3>Multi-Select Filter</h3>
+
+        <!-- Command Search Bar -->
+        <div class="field">
+          <label for="vizCommandInput">Command Query</label>
+          <div class="viz-row">
+            <input type="text" id="vizCommandInput" placeholder="e.g. India Trailing PE" autocomplete="off" />
+            <button type="button" id="vizCommandApplyBtn" class="primary">Apply</button>
+          </div>
+          <div id="vizSuggestions" class="suggestions" aria-live="polite" aria-atomic="true"></div>
+        </div>
+
+        <!-- Sheet Selector with dynamic filter -->
+        <div class="field">
+          <label for="vizSheetFilter">Sheets</label>
+          <input type="search" id="vizSheetFilter" placeholder="Filter sheets…" />
+          <div class="viz-actions">
+            <button type="button" id="vizSelectFilteredSheetsBtn" class="ghost">Select Filtered</button>
+            <button type="button" id="vizClearSheetsBtn" class="ghost">Clear</button>
+          </div>
+          <div id="vizSheetList" class="checkList" aria-label="Sheets"></div>
+        </div>
+
+        <!-- Country Selector with dynamic filter -->
+        <div class="field">
+          <label for="vizCountryFilter">Countries</label>
+          <input type="search" id="vizCountryFilter" placeholder="Filter countries…" />
+          <div class="viz-actions">
+            <button type="button" id="vizSelectFilteredCountriesBtn" class="ghost">Select Filtered</button>
+            <button type="button" id="vizClearCountriesBtn" class="ghost">Clear</button>
+          </div>
+          <div id="vizCountryList" class="checkList" aria-label="Countries"></div>
+        </div>
+
+        <!-- Secondary Actions -->
+        <div class="viz-actions viz-actions--secondary">
+          <button type="button" id="vizUndoBtn" class="ghost">Undo</button>
+          <button type="button" id="vizClearAllBtn" class="ghost danger">Clear All</button>
+        </div>
+      </aside>
+
+      <!-- Visualizer Large Chart Panel -->
+      <section class="main-content" aria-label="Factor Visualizer Workspace">
+        <!-- Stats Summary Banner -->
+        <div id="vizSummary" class="summary" aria-live="polite"></div>
+
+        <!-- Visualizer Toolbar -->
+        <div class="panel toolbar-panel">
+          <div class="toolbar-grid">
+            <!-- Range Selection Group -->
+            <div class="field">
+              <label>Chart Timeline Horizon</label>
+              <div class="viz-top-controls" role="group" aria-label="Chart timeline horizon">
+                <button type="button" class="rangeBtn vizRangeBtn" data-range="all">All</button>
+                <button type="button" class="rangeBtn vizRangeBtn" data-range="10y">10Y</button>
+                <button type="button" class="rangeBtn vizRangeBtn" data-range="5y">5Y</button>
+                <button type="button" class="rangeBtn vizRangeBtn" data-range="3y">3Y</button>
+                <button type="button" class="rangeBtn vizRangeBtn" data-range="1y">1Y</button>
+              </div>
+            </div>
+
+            <!-- Axis Selection Group -->
+            <div class="field">
+              <label>Data Axis Normalization</label>
+              <div class="viz-top-controls" role="group" aria-label="Data axis normalization">
+                <button type="button" class="axisBtn vizAxisBtn" data-axis="raw">Raw</button>
+                <button type="button" class="axisBtn vizAxisBtn" data-axis="indexed">Indexed</button>
+                <button type="button" class="axisBtn vizAxisBtn" data-axis="zscore">Z-Score (Static)</button>
+                <button type="button" class="axisBtn vizAxisBtn" data-axis="zscore_expanding">Z vs Own History</button>
+                <button type="button" class="axisBtn vizAxisBtn" data-axis="cross_sectional">Cross-Sectional</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Large Chart Panel -->
+        <div class="panel">
+          <div class="panelHead">
+            <h2>Multi-Factor Chart Analysis</h2>
+          </div>
+          <div class="canvasWrap large-canvasWrap">
+            <!-- Empty state loader / alert -->
+            <div id="vizEmptyState" class="emptyState">
+              Select at least one sheet and one country to start visualizing.
+            </div>
+            <div class="chartSkeleton" data-for="vizSeriesChart" aria-hidden="true"></div>
+            <canvas id="vizSeriesChart" role="img" aria-label="Multi-factor time series chart. Use the Plotted Series Manager below to toggle individual series."></canvas>
+          </div>
+        </div>
+
+        <!-- Legend and Custom Series Visibility Manager -->
+        <div class="panel">
+          <div class="legendHeader">Plotted Series Manager</div>
+          <div id="vizSeriesManager" class="seriesManager"></div>
+        </div>
+      </section>
+    </div>
   </main>
+
+  <!-- Interactive SPA Tab Navigation Script.
+       Implements the WAI-ARIA tabs pattern: the two buttons are role=tab
+       inside a role=tablist, the views are role=tabpanel, selection is
+       exposed via aria-selected, hidden panels use the [hidden] attribute,
+       and Left/Right arrows move focus between tabs. -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const tabTriptych = document.getElementById('tabTriptych');
+      const tabVisualizer = document.getElementById('tabVisualizer');
+      const triptychView = document.getElementById('triptych-view');
+      const visualizerView = document.getElementById('visualizer-view');
+      const tabs = [tabTriptych, tabVisualizer];
+
+      function switchTab(target, { focusTab = false } = {}) {
+        const goingVisualizer = target === 'visualizer';
+        tabTriptych.classList.toggle('active', !goingVisualizer);
+        tabVisualizer.classList.toggle('active', goingVisualizer);
+        tabTriptych.setAttribute('aria-selected', String(!goingVisualizer));
+        tabVisualizer.setAttribute('aria-selected', String(goingVisualizer));
+        // Use the [hidden] attribute (not inline display) so panels are
+        // hidden from assistive tech and the CSS grid still applies when shown.
+        triptychView.hidden = goingVisualizer;
+        visualizerView.hidden = !goingVisualizer;
+        triptychView.classList.toggle('is-hidden', goingVisualizer);
+        visualizerView.classList.toggle('is-hidden', !goingVisualizer);
+        window.dispatchEvent(new CustomEvent('tab-switch', { detail: goingVisualizer ? 'visualizer' : 'triptych' }));
+        if (focusTab) (goingVisualizer ? tabVisualizer : tabTriptych).focus();
+      }
+
+      function activate(tabBtn) {
+        switchTab(tabBtn === tabVisualizer ? 'visualizer' : 'triptych', { focusTab: false });
+        tabBtn.focus();
+      }
+
+      tabs.forEach((btn) => {
+        btn.addEventListener('click', () => activate(btn));
+        btn.addEventListener('keydown', (e) => {
+          const idx = tabs.indexOf(btn);
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            const next = tabs[(idx + 1) % tabs.length];
+            switchTab(next === tabVisualizer ? 'visualizer' : 'triptych', { focusTab: true });
+          } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const prev = tabs[(idx - 1 + tabs.length) % tabs.length];
+            switchTab(prev === tabVisualizer ? 'visualizer' : 'triptych', { focusTab: true });
+          } else if (e.key === 'Home') {
+            e.preventDefault();
+            switchTab('triptych', { focusTab: true });
+          } else if (e.key === 'End') {
+            e.preventDefault();
+            switchTab('visualizer', { focusTab: true });
+          }
+        });
+      });
+
+      // Check URL on load to determine the starting view
+      const params = new URLSearchParams(window.location.search);
+      const initialTab = params.get('tab');
+      switchTab(initialTab === 'visualizer' ? 'visualizer' : 'triptych');
+    });
+  </script>
 </body>
 
 </html>

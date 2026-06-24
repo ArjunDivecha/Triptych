@@ -1,209 +1,76 @@
-# Triptych
+# Triptych — App Usage
 
-Interactive local web apps for exploring the `T2 Master.xlsx` dataset across:
-- multiple variables (Excel sheets)
-- multiple countries/markets
-- time
+Interactive local web app for exploring the `T2 Master.xlsx` dataset across factors (Excel sheets), countries/markets, and time. Two tabs: **Triptych Deep-Dive** (factor-timing analysis for one market) and **Factor Visualizer** (multi-series charting workbench).
 
-`T2 Factor Visualizer` is optimized for multi-series comparison.
+## Quick start
 
-`Triptych` is optimized for a 3-panel workflow:
-- top panel: one selected variable (raw or normalized)
-- middle panel: cumulative return to selected country (absolute or relative to all-country average)
-- bottom panel: `N`-month forward return by decile (all deciles shown)
+Double-click `Triptych.app` at the repository root, or run manually:
 
-## Contents
-- Overview
-- Features
-- Triptych Features
-- Project Structure
-- Quick Start
-- Data Pipeline
-- How To Use
-- URL State Format
-- Guardrails and Limits
-- Troubleshooting
-- Development Notes
-
-## Overview
-`T2 Factor Visualizer` converts a multi-sheet Excel workbook into JSON and renders interactive time-series charts in the browser using Chart.js.
-
-Architecture:
-1. Python extractor reads workbook and writes `t2_master.json`
-2. Static frontend loads JSON and builds in-memory indices
-3. UI state drives chart rendering and URL synchronization
-
-## Features
-- Multi-select `Sheet` and `Country`
-- Command search (example: `India Trailing P/E`)
-- Fuzzy suggestion fallback for ambiguous inputs
-- Date range presets: `All`, `10Y`, `5Y`, `3Y`, `1Y`
-- Axis modes:
-  - `Raw` (native values)
-  - `Indexed` (rebased to 100)
-  - `Z-Score` (standardized)
-- Series manager with per-series visibility toggles
-- Auto-pruning when sheet/country combinations become invalid
-- Undo support (last 3 actions)
-- URL state persistence and shareable links
-- Render guardrails for large selections
-
-## Triptych Features
-- Single-variable focus by country
-- Top-panel normalization modes:
-  - `Raw`
-  - `Z-Score vs own history` (expanding window, no look-ahead)
-  - `Percentile vs other countries (same month)`
-- Middle panel cumulative return mode: `Absolute` or `Relative vs all-country average` (from return-index sheet)
-- Bottom panel forward return by signal decile (`N`-month average return for each decile)
-- Decile stats table (`Obs`, `Avg`, `Median`, `Hit Rate`)
-- Range controls and URL/local-state persistence
-
-## Project Structure
-```text
-app/
-  assets/
-    app.js                # Frontend logic/state/chart rendering
-    triptych.js           # Triptych app logic
-    styles.css            # UI styling
-    triptych.css          # Triptych app styling
-  data/
-    t2_master.json        # Generated data payload used by UI
-  docs/
-    PROGRAM.md            # Full technical reference
-  scripts/
-    extract_t2_master.py  # Workbook -> JSON extractor
-  index.html              # App shell
-  triptych.html           # Triptych shell
-  README.md               # This file
-```
-
-## Quick Start
-From repo root (`.../Amit`):
-
-1. Generate JSON from Excel
 ```bash
-python3 app/scripts/extract_t2_master.py \
-  --input "/Users/arjundivecha/Dropbox/AAA Backup/A Complete/T2 Factor Timing Fuzzy/T2 Master.xlsx" \
-  --output "app/data/t2_master.json"
+cd "/Users/arjundivecha/Dropbox/AAA Backup/A Working/Triptych/app/scripts"
+python3 serve_triptych.py --auto-refresh
+# open http://127.0.0.1:8123/triptych.html
 ```
 
-2. Start local server
+The header shows the data vintage ("Data through … · extracted …"). When the source workbook is newer than the dataset, the chip turns amber and the **Refresh Data** button (or the auto-refresh on launch) re-extracts it — the previous JSON is backed up to `data/backups/` first.
+
+## Triptych Deep-Dive tab
+
+Sidebar controls:
+
+| Control | Options | Notes |
+|---|---|---|
+| Factor Variable | any of the 58 sheets | searchable combobox |
+| Country / Market | any market in the sheet | searchable combobox |
+| Signal Normalization | Raw, Z-Score vs own history, Cross-Sectional | expanding z has no look-ahead; cross-sectional is z vs peers at each date |
+| Cumulative Return | Absolute, Relative | relative = vs equal-weighted all-country average |
+| Forward Horizon | 1/3/6/12/24/36 months | drives the bottom panel and tables |
+| Bucket Thresholds | Full-sample, Point-in-time | full-sample is descriptive (has look-ahead); point-in-time uses expanding thresholds with a 36-month warm-up |
+| Buckets | Deciles (10), Quintiles (5), Terciles (3) | use fewer buckets for short windows |
+| History Window | All, 10Y, 5Y, 3Y, 1Y | filters the analysis sample; the cumulative panel rebases at the window start |
+| Export | Tables → xlsx, Charts → PDF | xlsx has Bucket Stats + Horizon Matrix + Settings sheets |
+
+What you see:
+
+- **Stat cards**: latest signal value, current bucket, that bucket's average forward return and hit rate, and the Spearman IC (with an overlap-adjusted t-stat).
+- **Top panel**: the signal through time. σ units when normalized.
+- **Middle panel**: cumulative return, x-axis aligned with the top panel; hover either panel for a synchronized crosshair.
+- **Bottom panel**: average forward return per bucket; the current bucket has an orange border.
+- **Cross-Market Snapshot**: each market's current bucket for this factor vs its own history (selected market in orange).
+- **Bucket Statistics**: per-bucket obs/avg/median/hit rate/best/worst/t-stat, plus the top-minus-bottom spread row. The current bucket's row is highlighted.
+- **Bucket × Horizon matrix**: average forward return heatmap with per-horizon IC row — shows at which horizon the signal works.
+
+URL parameters (`tf`, `tc`, `tn`, `tm`, `th`, `tr`, `td`, `tb`) persist the view; share the URL to reproduce it. (State is URL-only; there is no localStorage persistence — share the URL to reproduce a view.)
+
+## Factor Visualizer tab
+
+- Check any sheets and countries (filter boxes + Select Filtered / Clear)
+- Command query: type e.g. `India Trailing PE` and press Enter; fuzzy suggestions appear for ambiguous input
+- Axis modes: Raw, Indexed (rebased to 100), Z-Score (static over visible window), Z vs Own History (expanding), Cross-Sectional
+- Series manager toggles individual series; Undo restores the last 3 selection states
+- URL parameters are namespaced `vs`, `vc`, `vr`, `va`, `vh` (no collision with the Deep-Dive tab)
+- State is URL-only (no localStorage); share the URL to reproduce a view
+- Guardrails warn at >50 series / >100k points and block >80 series / >200k points
+
+## Data pipeline
+
 ```bash
-cd app
-python3 -m http.server 8000
+# manual re-extract (defaults to the canonical source and output below)
+python3 scripts/extract_t2_master.py
 ```
 
-3. Open in browser
-- `http://127.0.0.1:8000`
-- Visualizer: `http://127.0.0.1:8000/index.html`
-- Triptych: `http://127.0.0.1:8000/triptych.html`
+- Input: `/Users/arjundivecha/Dropbox/AAA Backup/A Complete/T2 Factor Timing Fuzzy/T2 Master.xlsx`
+- Output: `data/t2_master.json` — columnar format v2 (`format: 2`, per-sheet `dates[]` + per-country `values[]`), compact, written atomically
+- The frontend requires format 2 and fails loudly on anything else
 
-## Data Pipeline
-### Input
-- Excel workbook with multiple sheets
-- First row contains country/market headers
-- First column contains dates
-- Remaining cells contain numeric values (or blanks)
+## Server API
 
-### Output JSON
-Top-level shape:
-```json
-{
-  "generated_at": "...",
-  "source_file": "...",
-  "sheets": {
-    "Sheet Name": {
-      "countries": ["India", "U.S.", "..."],
-      "rows": [
-        {
-          "date": "YYYY-MM-DD",
-          "values": {
-            "India": 12.34,
-            "U.S.": 9.87
-          }
-        }
-      ]
-    }
-  }
-}
-```
-
-## How To Use
-### 1) Choose data
-- Use `Sheet Filter` + `Select Filtered` to bulk-select variables
-- Use `Country Filter` + `Select Filtered` to bulk-select countries
-
-### 2) Command search
-- Enter phrases like:
-  - `India Trailing PE`
-  - `Japan Earnings Yield`
-  - `ChinaA REER`
-- Click `Apply`
-
-### 3) View controls
-- Range buttons trim chart horizon
-- Axis mode changes transformation behavior
-- Series Manager lets you hide/show individual lines
-
-### 4) Undo and clear
-- `Undo` restores last selection snapshot
-- `Clear` buttons remove current list selections
-- `Clear All` resets both lists and hidden-series state
-
-## URL State Format
-State is encoded in query params:
-- `s=` selected sheet indices
-- `c=` selected country indices
-- `r=` range (`all|10y|5y|3y|1y`)
-- `a=` axis (`raw|indexed|zscore`)
-- `h=` hidden series index pairs
-- `partial=1` indicates trimmed share state
-
-Example:
-```text
-?s=1,7,12&c=2,8&r=5y&a=raw&h=1-2.7-8
-```
-
-## Guardrails and Limits
-To prevent browser lockups:
-- Warn/confirm when render is large
-- Block rendering when selection is too large
-- URL payload is capped to keep links practical
-
-Key caps in frontend:
-- max URL length target: `1800` chars
-- max decoded sheet indices: `80`
-- max decoded country indices: `80`
-- max hidden-series entries from URL: `500`
+- `GET /api/status` — dataset vintage, source workbook mtime, `stale` flag, refresh state
+- `POST /api/refresh` — backup + re-extract + atomic replace (409 if already running)
+- Static files are gzip-compressed when the browser accepts it (~6 MB JSON → ~2 MB wire)
 
 ## Troubleshooting
-### App loads but chart is blank
-- Ensure at least one sheet and one country are selected
-- Check `Series Manager` for `No data`, `Not indexable`, or `Not normalizable`
-- Switch from `Z-Score`/`Indexed` to `Raw` to verify data availability
 
-### Not seeing full time history
-- Click `All` range
-- Hard refresh browser (`Cmd+Shift+R`) after JS updates
-
-### `localhost refused to connect`
-- Restart the server:
-```bash
-cd app
-python3 -m http.server 8000
-```
-
-### Extractor fails
-- Confirm Python version and `openpyxl` availability
-- Re-run extraction command and verify input path exists
-
-## Development Notes
-- Frontend is framework-free vanilla JS for portability
-- No backend required; static hosting is enough
-- Chart library is loaded via CDN in `index.html`
-- Data must be regenerated when source workbook changes
-
-## Additional Documentation
-See full technical reference:
-- [PROGRAM.md](/Users/arjundivecha/Dropbox/AAA Backup/A Working/Amit/app/docs/PROGRAM.md)
+- **"Refresh status unavailable"** — the app is being served by something other than `serve_triptych.py` (e.g. a plain `python3 -m http.server`). Charts work; refresh does not.
+- **Refresh fails** — the error from the extractor is shown verbatim in the banner and recorded in `/api/status`. Check that the source workbook exists and `openpyxl` is installed.
+- **App icon does nothing** — check `~/Library/Logs/Triptych.log`.

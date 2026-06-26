@@ -450,6 +450,30 @@ window.T2Core = (() => {
     return { ic, t };
   }
 
+  /* Ordinary least-squares linear fit of y on x.
+     Returns { slope, intercept, r2 } or nulls when underdetermined. */
+  function linearFit(xs, ys) {
+    const n = xs.length;
+    if (n < 2) return { slope: null, intercept: null, r2: null };
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = ys.reduce((a, b) => a + b, 0) / n;
+    let sxx = 0;
+    let sxy = 0;
+    let syy = 0;
+    for (let i = 0; i < n; i += 1) {
+      const dx = xs[i] - mx;
+      const dy = ys[i] - my;
+      sxx += dx * dx;
+      sxy += dx * dy;
+      syy += dy * dy;
+    }
+    if (sxx === 0) return { slope: null, intercept: null, r2: null };
+    const slope = sxy / sxx;
+    const intercept = my - slope * mx;
+    const r2 = syy > 0 ? (sxy * sxy) / (sxx * syy) : null;
+    return { slope, intercept, r2 };
+  }
+
   function bucketStats(records, k, horizonMonths) {
     const buckets = Array.from({ length: k }, () => []);
     records.forEach((r) => {
@@ -507,6 +531,7 @@ window.T2Core = (() => {
     rankArray,
     pearson,
     spearmanIC,
+    linearFit,
     bucketStats,
     // helpers
     normalizeToken,

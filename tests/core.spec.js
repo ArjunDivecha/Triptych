@@ -127,6 +127,33 @@ test.describe('T2Core shared math', () => {
     expect(got.normal).not.toBeNull();
   });
 
+  test('linearFit recovers slope/intercept/R2 for known data', async ({ page }) => {
+    const got = await page.evaluate(() => {
+      const C = window.T2Core;
+      // Perfect line y = 2x + 1 -> slope 2, intercept 1, R2 = 1.
+      const perfect = C.linearFit([1, 2, 3, 4, 5], [3, 5, 7, 9, 11]);
+      // Flat line -> zero variance in y -> R2 null but slope 0.
+      const flat = C.linearFit([1, 2, 3], [4, 4, 4]);
+      // Single point -> underdetermined -> nulls.
+      const one = C.linearFit([1], [2]);
+      // No x variance -> nulls.
+      const noVar = C.linearFit([3, 3, 3], [1, 2, 3]);
+      // Noisy positive relationship: slope positive, 0 < R2 < 1.
+      const noisy = C.linearFit([1, 2, 3, 4, 5, 6], [2, 4, 3, 8, 7, 11]);
+      return { perfect, flat, one, noVar, noisy };
+    });
+    expect(got.perfect.slope).toBeCloseTo(2, 6);
+    expect(got.perfect.intercept).toBeCloseTo(1, 6);
+    expect(got.perfect.r2).toBeCloseTo(1, 6);
+    expect(got.flat.slope).toBeCloseTo(0, 6);
+    expect(got.flat.r2).toBeNull();
+    expect(got.one).toEqual({ slope: null, intercept: null, r2: null });
+    expect(got.noVar).toEqual({ slope: null, intercept: null, r2: null });
+    expect(got.noisy.slope).toBeGreaterThan(0);
+    expect(got.noisy.r2).toBeGreaterThan(0);
+    expect(got.noisy.r2).toBeLessThan(1);
+  });
+
   test('shared indexes build once and expose the dataset domain', async ({ page }) => {
     // Confirms T2Core.buildIndexes produces a sane date domain and that the
     // index layer is shared (both tabs set T2Core.indexes to the same object).

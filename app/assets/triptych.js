@@ -986,6 +986,24 @@ function render() {
   dom.bottomTitle.textContent = `${state.horizonMonths}M Forward Return by ${bucketWord()} (${
     state.decileMode === "pit" ? "point-in-time" : "full-sample"
   } thresholds)`;
+  // Linear best-fit of bucket averages (x = bucket index 1..k, y = avg fwd return).
+  // Computed once here and reused for the overlay line in the bottom chart.
+  const fitXs = [];
+  const fitYs = [];
+  computed.bottomStats.forEach((s, i) => {
+    if (Number.isFinite(s.avg)) {
+      fitXs.push(i + 1);
+      fitYs.push(s.avg);
+    }
+  });
+  const bottomFit = T2Core.linearFit(fitXs, fitYs);
+  if (Number.isFinite(bottomFit.slope)) {
+    const slopeTxt = `slope ${formatPct(bottomFit.slope, 2)}/bucket`;
+    const r2Txt = Number.isFinite(bottomFit.r2)
+      ? ` · R² ${bottomFit.r2.toFixed(2)}`
+      : "";
+    dom.bottomTitle.textContent += `  —  ${slopeTxt}${r2Txt}`;
+  }
   dom.snapshotTitle.textContent = `Cross-Market Snapshot: current ${bucketWord().toLowerCase()} of ${
     state.factorSheet
   } vs each market's own history`;
@@ -1061,6 +1079,9 @@ function render() {
 
   charts.bottom.options.plugins.tooltip.callbacks.label = (ctx) => {
     const val = Number(ctx.parsed.y);
+    if (ctx.dataset.label === "Linear fit") {
+      return `Linear fit: ${formatPct(val, 2)}`;
+    }
     const stat = computed.bottomStats[ctx.dataIndex];
     const obsText = stat && Number.isFinite(stat.count) ? ` (${stat.count} obs)` : "";
     return `Avg ${state.horizonMonths}M forward return: ${formatPct(val, 2)}${obsText}`;
@@ -1101,6 +1122,12 @@ function render() {
   const cb = computed.currentBucket;
   const k = state.bucketCount;
   charts.bottom.data.labels = Array.from({ length: k }, (_, i) => String(i + 1));
+
+  // Fitted y at every bucket index so the overlay line spans the full x range.
+  const fitLine = computed.bottomStats.map((_s, i) =>
+    Number.isFinite(bottomFit.slope) ? bottomFit.intercept + bottomFit.slope * (i + 1) : null,
+  );
+
   charts.bottom.data.datasets = [
     {
       label: `Avg ${state.horizonMonths}M forward return`,
@@ -1117,6 +1144,21 @@ function render() {
       borderWidth: computed.bottomStats.map((_s, i) => (cb && i + 1 === cb ? 3 : 1)),
       barPercentage: 0.85,
       categoryPercentage: 0.9,
+      order: 1,
+    },
+    {
+      type: "line",
+      label: "Linear fit",
+      data: fitLine,
+      borderColor: COLORS.highlight,
+      backgroundColor: COLORS.highlight,
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      tension: 0,
+      fill: false,
+      spanGaps: false,
+      order: 0,
     },
   ];
 

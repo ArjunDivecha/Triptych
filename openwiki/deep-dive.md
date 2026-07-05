@@ -69,7 +69,7 @@ Recent work added a linear best-fit overlay to the bottom bucket-return chart an
 
 That feature is useful because it makes monotonicity readable at a glance: the bucket chart is no longer just a sequence of bars; it now also communicates whether the bucket curve trends smoothly upward or downward.
 
-The implementation evidence in git shows this was added in commit `b96bf51` by extending `app/assets/core.js`.
+The linear fit logic lives in `app/assets/core.js` alongside the other shared math helpers.
 
 ## Exports
 

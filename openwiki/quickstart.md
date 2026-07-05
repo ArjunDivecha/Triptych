@@ -71,4 +71,4 @@ Use OpenWiki for the shortest path into the repository, then jump back to the so
 
 - Recent work moved shared logic into `app/assets/core.js`; avoid reintroducing tab-specific copies of the same math.
 - The slope/R² addition in the bottom bucket panel is part of the Deep-Dive workflow and is computed from the decile curve, not from the raw signal series.
-- The current repo includes uncommitted local data/script changes; inspect `git status` before altering the data pipeline.
+- The data pipeline scripts (`extract_t2_master.py`, `serve_triptych.py`) and the generated dataset are all committed; inspect `git status` before altering the data pipeline to detect any local changes.

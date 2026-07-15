@@ -36,12 +36,27 @@ When a refresh runs:
 
 This prevents partial writes and preserves a short backup history.
 
+## Cloud deployment (Vercel)
+
+The app can also be deployed as a static site on Vercel. In this mode there is no Python server; `vercel.json` configures static rewrites that map `/api/status` and `/api/refresh` to committed JSON stubs under `app/api/`.
+
+- `app/api/status.json` returns `{"cloud_mode": true, …}` with a message explaining that refresh is not available in the cloud deployment.
+- `app/api/refresh.json` returns an error JSON with redeploy instructions.
+- `app/assets/triptych.js` checks `status.cloud_mode` and hides the Refresh Data button when true, since live workbook re-extraction is not possible without the local Python server.
+
+To refresh data in a cloud deployment, re-extract locally with `extract_t2_master.py` and redeploy with `vercel --prod`.
+
+### iframe embedding
+
+`vercel.json` sets `frame-ancestors *` in the Content-Security-Policy header, allowing the deployed app to be embedded in an iframe. This was added so the ASADO cockpit can host Triptych as a read-only in-page popup. The app has no auth or mutation actions in cloud mode, so framing is low-risk.
+
 ## Requirements
 
 The docs describe the runtime requirements as:
 - macOS for the bundled app experience
 - Google Chrome preferred, with a fallback to the default browser if Chrome is unavailable
 - Python 3 with `openpyxl` for extraction and refresh
+- Vercel (optional) for cloud deployment; no server-side runtime needed there
 
 ## Troubleshooting signals
 
@@ -74,6 +89,9 @@ When touching launch or refresh code:
 
 - `app/scripts/serve_triptych.py`
 - `app/scripts/extract_t2_master.py`
+- `app/api/status.json`
+- `app/api/refresh.json`
+- `vercel.json`
 - `app/README.md`
 - `README.md`
 - `playwright.config.js`

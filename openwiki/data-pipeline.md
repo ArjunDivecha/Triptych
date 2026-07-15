@@ -60,6 +60,10 @@ This columnar layout stores dates and country names once, which makes the datase
 
 Concurrent refreshes are blocked by a lock. If a refresh is already running, the server returns 409.
 
+### Cloud deployment caveat
+
+On the Vercel static deployment, `/api/refresh` is rewritten to `app/api/refresh.json`, which returns a static error explaining that refresh is unavailable. Data updates must be done locally by running `extract_t2_master.py` and then redeploying. The frontend checks `cloud_mode` from `/api/status` and hides the refresh button accordingly.
+
 ## Backups
 
 The server keeps timestamped gzipped backups of the previous dataset and trims the backup directory to the 10 most recent files.
@@ -89,3 +93,6 @@ That hard failure is intentional:
 - `app/assets/core.js`
 - `app/data/t2_master.json`
 - `app/data/backups/`
+- `app/api/status.json`
+- `app/api/refresh.json`
+- `vercel.json`

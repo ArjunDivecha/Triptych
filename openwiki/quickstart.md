@@ -25,7 +25,8 @@ The app is built to run locally, serve its own data, refresh from the workbook w
 
 ### Data and backend
 - `app/scripts/extract_t2_master.py` converts `T2 Master.xlsx` into `app/data/t2_master.json`.
-- `app/scripts/serve_triptych.py` serves static assets and exposes `/api/status` and `/api/refresh`.
+- `app/scripts/serve_triptych.py` serves static assets and exposes `/api/status` and `/api/refresh` for local runs.
+- `vercel.json` configures a static Vercel deployment that rewrites the API endpoints to committed JSON stubs in `app/api/`; in cloud mode the refresh button is hidden.
 - `app/data/backups/` stores timestamped gzipped backups of the previous dataset during refresh.
 
 ### Verification

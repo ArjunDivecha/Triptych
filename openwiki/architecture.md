@@ -94,7 +94,7 @@ Representative shape:
 
 ## Server and refresh behavior
 
-`app/scripts/serve_triptych.py` is a stdlib-only HTTP server.
+`app/scripts/serve_triptych.py` is a stdlib-only HTTP server used for local runs.
 
 It does three important things:
 - serves static files from `app/`
@@ -107,6 +107,10 @@ Refreshes are single-flight and atomic:
 - the new JSON replaces the old file atomically
 
 The server also gzip-compresses static assets when the browser accepts gzip.
+
+### Cloud (Vercel) deployment
+
+The same `app/` directory can be deployed as a static site on Vercel. `vercel.json` rewrites `/api/status` and `/api/refresh` to committed JSON stubs in `app/api/` that return `cloud_mode: true` and explain that refresh is unavailable. The frontend hides the Refresh Data button when `cloud_mode` is set. Data updates require local re-extraction and redeployment. See [Operations](operations.md) for details.
 
 ## macOS launch bundle
 
@@ -129,6 +133,9 @@ The launch bundle depends on the same Python server and extraction script descri
 - `app/scripts/serve_triptych.py`
 - `app/scripts/extract_t2_master.py`
 - `app/triptych.html`
+- `vercel.json`
+- `app/api/status.json`
+- `app/api/refresh.json`
 - `README.md`
 - `app/README.md`
 - `app/docs/PROGRAM.md`

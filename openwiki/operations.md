@@ -1,3 +1,9 @@
+---
+type: "Reference"
+title: "Operations"
+openwiki_generated: true
+---
+
 # Operations
 
 This repository is designed to run locally with a simple operational model: static frontend files, a stdlib Python server, and an Excel-to-JSON refresh path.
@@ -85,6 +91,15 @@ When touching launch or refresh code:
 - keep gzip handling for static assets and JSON
 - update the docs if the launch path or API contract changes
 
+## CI: OpenWiki auto-update workflow
+
+`.github/workflows/openwiki-update.yml` runs a scheduled daily OpenWiki documentation refresh. The workflow uses `openwiki code --update --print` with the OpenRouter provider and LangSmith tracing, then opens a pull request (via `peter-evans/create-pull-request`) against the default branch instead of pushing directly. The PR includes changes under `openwiki/`, `AGENTS.md`, `CLAUDE.md`, and the workflow file itself.
+
+Requirements for the workflow:
+- `secrets.OPENROUTER_API_KEY` — model access
+- `secrets.LANGSMITH_API_KEY` — optional tracing
+- `permissions: contents: write` and `pull-requests: write`
+
 ## Source files to inspect
 
 - `app/scripts/serve_triptych.py`
@@ -97,3 +112,4 @@ When touching launch or refresh code:
 - `playwright.config.js`
 - `tests/core.spec.js`
 - `tests/smoke.spec.js`
+- `.github/workflows/openwiki-update.yml`

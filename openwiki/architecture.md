@@ -1,3 +1,9 @@
+---
+type: "Reference"
+title: "Architecture"
+openwiki_generated: true
+---
+
 # Architecture
 
 Triptych is a single-repository, local-first web app with three main layers:

@@ -1,3 +1,9 @@
+---
+type: "Reference"
+title: "Data pipeline"
+openwiki_generated: true
+---
+
 # Data pipeline
 
 Triptych’s data pipeline is a workbook-to-JSON conversion with a refreshable local cache.

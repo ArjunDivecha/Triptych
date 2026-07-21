@@ -1,3 +1,9 @@
+---
+type: "Reference"
+title: "Triptych Deep-Dive"
+openwiki_generated: true
+---
+
 # Triptych Deep-Dive
 
 The Deep-Dive tab is the core analytical workflow in Triptych. It answers: for one factor and one market, what does the signal look like over time, how do forward returns behave by bucket, and how consistent is the relationship across horizons?

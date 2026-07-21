@@ -1,3 +1,9 @@
+---
+type: "Reference"
+title: "Testing"
+openwiki_generated: true
+---
+
 # Testing
 
 Triptych uses Playwright browser tests to validate both the shared math layer and the two-tab UI.

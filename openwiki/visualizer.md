@@ -1,3 +1,9 @@
+---
+type: "Reference"
+title: "Factor Visualizer"
+openwiki_generated: true
+---
+
 # Factor Visualizer
 
 The Factor Visualizer is the second Triptych tab. It is a multi-series charting workbench for exploring arbitrary combinations of factors and countries from the same dataset used by the Deep-Dive workflow.

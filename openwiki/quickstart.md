@@ -1,3 +1,9 @@
+---
+type: "Reference"
+title: "OpenWiki quickstart"
+openwiki_generated: true
+---
+
 # OpenWiki quickstart
 
 Triptych is a local-first factor-timing dashboard for cross-country equity analysis. It turns a multi-sheet Excel workbook into an interactive web app with two views:

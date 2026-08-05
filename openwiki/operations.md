@@ -1,7 +1,14 @@
 ---
-type: "Reference"
-title: "Operations"
-openwiki_generated: true
+type: Reference
+title: Operations
+description: Local and cloud deployment, refresh behavior, API surface, requirements, troubleshooting, and the OpenWiki auto-update CI workflow for Triptych.
+tags: [operations, deployment, refresh, ci]
+openwiki:
+  roles: [operations, delivery]
+  change_kinds: [lifecycle, deployment]
+  source_paths: [app/scripts/serve_triptych.py, app/scripts/extract_t2_master.py, vercel.json, .github/workflows/openwiki-update.yml]
+  invariants: [Refresh is single-flight; refresh writes atomically with backup; backups trimmed to 10; cloud mode hides refresh.]
+  validation_commands: ["npx playwright test"]
 ---
 
 # Operations
@@ -93,12 +100,11 @@ When touching launch or refresh code:
 
 ## CI: OpenWiki auto-update workflow
 
-`.github/workflows/openwiki-update.yml` runs a scheduled daily OpenWiki documentation refresh. The workflow uses `openwiki code --update --print` with the OpenRouter provider and LangSmith tracing, then opens a pull request (via `peter-evans/create-pull-request`) against the default branch instead of pushing directly. The PR includes changes under `openwiki/`, `AGENTS.md`, `CLAUDE.md`, and the workflow file itself.
+`.github/workflows/openwiki-update.yml` runs a scheduled daily OpenWiki documentation refresh (`openwiki --update --print`) using the OpenRouter provider (`OPENWIKI_MODEL_ID: z-ai/glm-5.2`). It then commits changes under `openwiki/` and pushes directly to the default branch — it does not open a pull request.
 
 Requirements for the workflow:
 - `secrets.OPENROUTER_API_KEY` — model access
-- `secrets.LANGSMITH_API_KEY` — optional tracing
-- `permissions: contents: write` and `pull-requests: write`
+- `permissions: contents: write`
 
 ## Source files to inspect
 

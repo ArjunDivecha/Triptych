@@ -1,7 +1,16 @@
 ---
-type: "Reference"
-title: "Architecture"
-openwiki_generated: true
+type: Reference
+title: Architecture
+description: Triptych's three-layer local-first architecture — Python data preparation, shared window.T2Core runtime logic, and two browser tabs on one columnar v2 dataset.
+tags: [architecture, frontend, data-model, core]
+openwiki:
+  roles: [architecture, domain]
+  change_kinds: [core, data-model, lifecycle]
+  source_paths: [app/assets/core.js, app/assets/triptych.js, app/assets/app.js, app/triptych.html, app/scripts/serve_triptych.py, app/scripts/extract_t2_master.py]
+  symbols: [window.T2Core, __t2DataPromise, normalizeToken, linearFit, spearmanIC, PIT_MIN_OBS]
+  test_paths: [tests/core.spec.js]
+  invariants: [Dataset must be format:2 or core.js throws; core.js loads before tab scripts; indexes built once and shared; no CDN dependencies.]
+  validation_commands: ["npx playwright test core.spec.js"]
 ---
 
 # Architecture
@@ -120,7 +129,7 @@ The same `app/` directory can be deployed as a static site on Vercel. `vercel.js
 
 ## macOS launch bundle
 
-The repository includes a clickable macOS app bundle at the repo root. The docs describe it as the preferred launch path for local use, with the server started automatically if needed.
+The repository documents a clickable macOS app bundle (`Triptych.app/`) at the repo root as the preferred launch path for local use, with the server started automatically if needed. The bundle itself is gitignored and not committed — it is regenerated locally via `app/scripts/gen_icon.py` (PIL → sips → iconutil) plus the committed launcher files.
 
 The launch bundle depends on the same Python server and extraction script described above; it is an operating wrapper, not a separate application architecture.
 

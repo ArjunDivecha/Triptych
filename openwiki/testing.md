@@ -1,7 +1,14 @@
 ---
-type: "Reference"
-title: "Testing"
-openwiki_generated: true
+type: Reference
+title: Testing
+description: Playwright browser tests validating the shared math layer (core.spec.js) and both tab UIs (smoke.spec.js) against the live app.
+tags: [testing, playwright, validation]
+openwiki:
+  roles: [testing]
+  change_kinds: [validation]
+  source_paths: [playwright.config.js, tests/core.spec.js, tests/smoke.spec.js]
+  invariants: [core.js must load before tab scripts; tests run against the live server on port 8124.]
+  validation_commands: ["npx playwright test"]
 ---
 
 # Testing

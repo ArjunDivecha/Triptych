@@ -1,7 +1,16 @@
 ---
-type: "Reference"
-title: "Triptych Deep-Dive"
-openwiki_generated: true
+type: Reference
+title: Triptych Deep-Dive
+description: The core analytical workflow for one factor and one market — signal charts, cumulative returns, bucket statistics, horizon matrix, exports, and refresh UX.
+tags: [deep-dive, frontend, analytics, bucketing, exports]
+openwiki:
+  roles: [domain, workflow]
+  change_kinds: [ui, analytics, exports]
+  source_paths: [app/assets/triptych.js, app/assets/core.js]
+  symbols: [hydrateFromStorage, persistState, applyHydrated, setupCombobox]
+  test_paths: [tests/core.spec.js, tests/smoke.spec.js]
+  invariants: [Shared math lives in core.js; PIT bucketing needs 36-month warm-up; nearest-date tolerance is 15 days; state is URL-only.]
+  validation_commands: ["npx playwright test core.spec.js smoke.spec.js"]
 ---
 
 # Triptych Deep-Dive

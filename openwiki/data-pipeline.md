@@ -1,7 +1,15 @@
 ---
-type: "Reference"
-title: "Data pipeline"
-openwiki_generated: true
+type: Reference
+title: Data pipeline
+description: Workbook-to-JSON extraction, format v2 columnar contract, refresh flow, backups, and the cloud-mode caveat for Triptych.
+tags: [data-pipeline, extraction, refresh, format-v2]
+openwiki:
+  roles: [domain, operations]
+  change_kinds: [data-model, lifecycle]
+  source_paths: [app/scripts/extract_t2_master.py, app/scripts/serve_triptych.py, app/assets/core.js, app/data/t2_master.json, app/api/status.json, app/api/refresh.json, vercel.json]
+  symbols: [extract_workbook, backup_current_json, format]
+  invariants: [Dataset format must equal 2 or core.js throws; refresh is single-flight with 409 on conflict; backups trimmed to 10.]
+  validation_commands: ["npx playwright test core.spec.js"]
 ---
 
 # Data pipeline

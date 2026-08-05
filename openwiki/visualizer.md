@@ -1,7 +1,16 @@
 ---
-type: "Reference"
-title: "Factor Visualizer"
-openwiki_generated: true
+type: Reference
+title: Factor Visualizer
+description: The multi-series charting workbench tab for exploring arbitrary factor and country combinations, with namespaced URL-only state and render guardrails.
+tags: [visualizer, frontend, url-state, charting]
+openwiki:
+  roles: [domain, workflow]
+  change_kinds: [ui, url-state]
+  source_paths: [app/assets/app.js, app/assets/core.js]
+  symbols: [hydrateFromStorage, persistToStorage, updateUrlFromState]
+  test_paths: [tests/smoke.spec.js]
+  invariants: [State is URL-only (localStorage hooks are no-ops); URL params are namespaced vs/vc/vr/va/vh; guardrails warn at >50 series/>100k points and block >80 series/>200k points.]
+  validation_commands: ["npx playwright test smoke.spec.js"]
 ---
 
 # Factor Visualizer
@@ -47,7 +56,9 @@ This is a more exploratory workflow than Deep-Dive, which is why the tab has a s
 
 ## URL and persistence model
 
-The visualizer stores state in the URL and localStorage, with namespaced parameters so it does not collide with the Deep-Dive tab.
+The visualizer stores state in the URL only, with namespaced parameters so it does not collide with the Deep-Dive tab.
+
+`hydrateFromStorage()` returns `null` and `persistToStorage()` is a no-op — persistence is URL-only, matching the Deep-Dive tab and the `app/README.md` guarantee. Hydration order is defaults → URL (URL wins).
 
 That design matters because both tabs live in the same app shell and share runtime helpers. Keep the parameter namespaces separate if you add new URL state.
 

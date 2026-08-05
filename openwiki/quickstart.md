@@ -1,7 +1,14 @@
 ---
-type: "Reference"
-title: "OpenWiki quickstart"
-openwiki_generated: true
+type: Reference
+title: OpenWiki quickstart
+description: Entry point for the Triptych OpenWiki knowledge base — what the app does, how the docs are organized, and where to go next for any change area.
+tags: [quickstart, navigation, overview]
+openwiki:
+  roles: [repository]
+  change_kinds: [navigation]
+  source_paths: [README.md, app/README.md, app/docs/PROGRAM.md]
+  invariants: [Two tabs share window.T2Core and one columnar v2 dataset; state is URL-only for both tabs.]
+  validation_commands: ["npx playwright test"]
 ---
 
 # OpenWiki quickstart

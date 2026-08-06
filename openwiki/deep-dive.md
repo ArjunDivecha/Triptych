@@ -7,9 +7,9 @@ openwiki:
   roles: [domain, workflow]
   change_kinds: [ui, analytics, exports]
   source_paths: [app/assets/triptych.js, app/assets/core.js]
-  symbols: [hydrateFromStorage, persistState, applyHydrated, setupCombobox]
+  symbols: [hydrateFromStorage, persistState, applyHydrated, setupCombobox, pollRefreshUntilDone, REFRESH_POLL_MAX_ATTEMPTS]
   test_paths: [tests/core.spec.js, tests/smoke.spec.js]
-  invariants: [Shared math lives in core.js; PIT bucketing needs 36-month warm-up; nearest-date tolerance is 15 days; state is URL-only.]
+  invariants: [Shared math lives in core.js; PIT bucketing needs 36-month warm-up; nearest-date tolerance is 15 days; state is URL-only; refresh polling is capped at 120 attempts (~2 min) then surfaces a timeout.]
   validation_commands: ["npx playwright test core.spec.js smoke.spec.js"]
 ---
 
@@ -99,6 +99,8 @@ The README and technical docs describe the output sheets and page structure; if 
 The Deep-Dive tab also manages the refresh banner and data-vintage chip.
 It polls the local server while refreshes run and reloads when the dataset updates.
 
+Refresh polling is guarded against an unbounded loop: `pollRefreshUntilDone()` in `app/assets/triptych.js` polls `/api/status` once per second, capped at 120 attempts (~2 minutes), then surfaces a timeout banner directing the user to `~/Library/Logs/Triptych.log`. This cap exists because an earlier version polled every second forever if `refresh_running` never cleared (server crash mid-refresh, stuck lock). On completion it compares the new `dataset_generated_at` to the value loaded before the refresh; if unchanged it reports "Dataset already current" instead of reloading.
+
 ## What to inspect before making changes
 
 - `app/assets/triptych.js`
@@ -114,4 +116,5 @@ It polls the local server while refreshes run and reloads when the dataset updat
 - Do not duplicate bucket, IC, or z-score logic in this file if the same logic belongs in `core.js`.
 - Keep the point-in-time vs full-sample distinction visible to users.
 - Preserve the nearest-date tolerance behavior; other parts of the app assume month-start and month-end grids both work.
+- Keep the refresh polling cap (`REFRESH_POLL_MAX_ATTEMPTS`); removing it reintroduces the unbounded poll loop on a stuck `refresh_running` state.
 - If export contents change, update the docs and tests together.
